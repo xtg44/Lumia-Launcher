@@ -2,6 +2,9 @@
 name = "lumia-launcher"
 version = "1.0.0-beta.1"
 edition = "2021"
+license = "MIT"
+description = "Lumia Launcher — 跨平台 Minecraft 启动器（Tauri 2 + Rust + Vue 3）"
+repository = "https://github.com/xtg44/Lumia-Launcher"
 
 [features]
 default = ["custom-protocol"]

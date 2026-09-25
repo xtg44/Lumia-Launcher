@@ -11,6 +11,7 @@
 [![Tauri](https://img.shields.io/badge/Tauri-2-24C8DB?style=flat-square&logo=tauri&logoColor=white)](https://tauri.app/)
 [![Vue](https://img.shields.io/badge/Vue-3-42b883?style=flat-square&logo=vuedotjs&logoColor=white)](https://vuejs.org/)
 [![Rust](https://img.shields.io/badge/Rust-stable-000000?style=flat-square&logo=rust&logoColor=white)](https://www.rust-lang.org/)
+[![License](https://img.shields.io/badge/license-MIT-3DA639?style=flat-square)](LICENSE)
 
 [官网](https://lumialauncher.cn) · [下载](https://lumialauncher.cn) · [插件语言文档](docs/lumi-reference.md) · [插件系统设计](docs/插件系统设计.md)
 
@@ -165,8 +166,19 @@ npm run tauri build -- --target universal-apple-darwin # 通用包
 ## 许可证
 
 本项目采用 **MIT License** 发布，完整条款见 [LICENSE](LICENSE)。
+
 Copyright (c) 2026 Lumia
-你可以自由使用、修改、分发本项目，包括商业用途，只需保留版权声明与许可声明。。
+
+你可以自由使用、修改、分发本项目，包括商业用途，只需保留版权声明与许可声明。
+
+### 第三方组件
+
+**Terracotta（联机功能）** — [burningtnt/Terracotta](https://github.com/burningtnt/Terracotta)，**AGPL-3.0**。
+本项目**不包含**其任何代码或二进制：首次使用联机功能时，客户端会从上游官方发布页下载**未经修改的二进制**，并通过本机 HTTP API 与之交互。依照 Terracotta 的 [AGPL 例外条款](https://github.com/burningtnt/Terracotta#license)，以上两种用法均不会导致本项目被 AGPL 涵盖；其版权信息已在应用「联机」页面显著位置标注（`Powered by Terracotta (AGPL v3)`）。
+
+**HMCL / PCL2 / Fold Craft Launcher** — 仅作设计与交互参考，其**源代码未包含**在本仓库中。
+
+其余依赖（Tauri、Vue、serde、tokio、reqwest 等）均为 MIT / Apache-2.0 等宽松许可，与本项目兼容。
 
 ---
 
