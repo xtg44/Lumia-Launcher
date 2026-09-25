@@ -1,221 +1,192 @@
-# Lumia Launcher – 前端开发指南
+<div align="center">
 
-> **本项目采用 Tauri + Vue 3 + TypeScript 架构。**  
-> 前端代码由 AI 辅助生成，后端（Rust）由开发者单独实现。  
-> 本指南专门为 AI 编程助手（如 Cursor、Copilot）提供上下文，以生成符合规范的前端代码。
+<img src="icon.png" width="110" alt="Lumia Launcher" />
 
----
+# Lumia Launcher
 
-## 📖 项目简介
+**跨平台 Minecraft 启动器** · Tauri 2 + Rust + Vue 3
 
-Lumia Launcher 是一款跨平台的 Minecraft 启动器（Windows / macOS / Linux），前端使用 Vue 3 + TypeScript 构建，后端使用 Rust + Tauri 提供系统能力。  
-**您只需要关注前端 UI 和交互逻辑**，所有系统调用（文件操作、进程管理、下载等）均通过 Tauri 的 `invoke` 调用后端命令实现。
+[![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-4c6ef5?style=flat-square)](#下载安装)
+[![Version](https://img.shields.io/badge/version-1.0.0--beta.1-e94560?style=flat-square)](#下载安装)
+[![Tauri](https://img.shields.io/badge/Tauri-2-24C8DB?style=flat-square&logo=tauri&logoColor=white)](https://tauri.app/)
+[![Vue](https://img.shields.io/badge/Vue-3-42b883?style=flat-square&logo=vuedotjs&logoColor=white)](https://vuejs.org/)
+[![Rust](https://img.shields.io/badge/Rust-stable-000000?style=flat-square&logo=rust&logoColor=white)](https://www.rust-lang.org/)
 
----
+[官网](https://lumialauncher.cn) · [下载](https://lumialauncher.cn) · [插件语言文档](docs/lumi-reference.md) · [插件系统设计](docs/插件系统设计.md)
 
-## 🛠️ 前端技术栈
-
-| 类别 | 技术 |
-|------|------|
-| 框架 | Vue 3 (Composition API + `<script setup>`) |
-| 语言 | TypeScript |
-| 构建工具 | Vite |
-| 桌面桥接 | Tauri (调用 `@tauri-apps/api`) |
-| 样式 | 原生 CSS（推荐配合 Tailwind CSS 或 UnoCSS 加速开发） |
-| 状态管理 | 组件内 `ref`/`reactive`，全局简单状态可用 `provide/inject` 或 Pinia |
-| 包管理器 | npm |
+</div>
 
 ---
 
-## 📁 前端项目结构（仅前端部分）
+## 简介
+
+Lumia Launcher 是一个用 **Rust + Tauri 2** 构建的轻量跨平台 Minecraft 启动器，界面使用 **Vue 3 + TypeScript**。
+
+安装包体积小、启动快，内置完整的版本管理与资源下载能力，并提供一套自研插件语言 **Lumi**，让零编程基础的用户也能给启动器写扩展。
+
+<!--
+  截图占位：真实截图放在 .github/screenshots/ 或 docs/images/ 后取消注释即可
+  <p align="center"><img src="docs/images/home.png" width="720" alt="主页" /></p>
+-->
+
+## 功能特性
+
+### 🎮 游戏与版本
+- **多版本管理** —— 原版及 **Forge / NeoForge / Fabric / Quilt** 加载器版本的安装、更新与删除
+- **一键启动**，自动匹配合适的 Java 版本
+- **Microsoft 账号登录**（完整的 MS → XBL → XSTS → Minecraft 令牌链）
+- **联机支持**（基于 Terracotta）
+- **崩溃报告**查看，启动异常可直接定位日志
+- macOS 支持 **Touch Bar** 操作
+
+### 📦 资源下载
+- 版本、Mod、整合包、资源包、光影包一站式下载安装
+- 接入 **BMCLAPI** 国内镜像，下载免代理
+- 同时支持 **Modrinth** 与 **CurseForge** 生态
+
+### 🎵 体验
+- 内置**音乐播放器**与常驻播放条
+- 内置 **AI 助手**面板
+- **深色主题**，界面简洁扁平
+- **7 种界面语言**：简体中文 / 繁體中文（中国台湾 / 中国香港）/ English / 日本語 / 한국어 / Français
+
+### 🧩 插件系统（Lumi）
+- 自研 **Lumi 插件语言**：类 Python 缩进语法、极简英文关键词，**零编程基础可读**
+- `.lplugin` 插件包 = zip 改后缀，可含脚本与资源文件
+- 事件驱动模型（`listen 控件.事件`），UI 由脚本解释出的控件树驱动
+- 支持压缩包 / 文件夹 / 单文件三种安装形态
+- 详见 [Lumi 语言完整参考](docs/lumi-reference.md) 与 [插件系统设计](docs/插件系统设计.md)
+
+### 🔧 其他
+- Java 路径自动扫描与手动指定、内存分配配置
+- 应用内自动更新检查与更新日志
+
+## 下载安装
+
+前往官网 **[lumialauncher.cn](https://lumialauncher.cn)**，页面会自动识别你的平台并给出对应安装包：
+
+| 平台 | 安装包 |
+|---|---|
+| Windows 10+ | `.exe` |
+| macOS 10.15+ | `.dmg`（Apple Silicon / Intel） |
+| Linux | 见官网说明 |
+
+> 当前为 **v1.0.0-beta.1** 测试版，功能与接口可能变动，欢迎反馈问题。
+
+## 技术栈
+
+| 层 | 技术 |
+|---|---|
+| 桌面框架 | Tauri 2 |
+| 后端 | Rust（约 12,000 行，6 个模块） |
+| 前端 | Vue 3.5（Composition API + `<script setup>`）+ TypeScript 5.6 |
+| 构建 | Vite 6 |
+| 国际化 | vue-i18n 11 |
+| 图标 / 渲染 | @iconify/vue、markdown-it、qrcode-generator |
+
+Rust 后端模块划分：
+
+| 模块 | 职责 |
+|---|---|
+| `main.rs` | 核心命令、版本解析、下载与启动逻辑 |
+| `lumi.rs` | Lumi 插件语言解释器 |
+| `plugins.rs` | 插件加载、注册与生命周期 |
+| `music.rs` | 音乐播放 |
+| `auth.rs` | Microsoft 登录与令牌刷新 |
+| `touchbar.rs` | macOS Touch Bar 集成 |
+
+## 项目结构
 
 ```
-src/
-├── assets/                # 静态资源（图片、字体、全局样式）
-│   └── main.css
-├── components/            # Vue 组件
-│   ├── AppHeader.vue      # 头部（Logo、状态显示）
-│   ├── HomeView.vue       # 主页（版本选择、启动、日志）
-│   ├── DownloadView.vue   # 下载页（在线版本列表、下载进度）
-│   ├── SettingsView.vue   # 设置页（Java 配置、内存、用户名）
-│   ├── VersionSelector.vue # 版本下拉框（可复用）
-│   └── LogDisplay.vue      # 日志显示区域（支持自动滚动）
-├── composables/           # 组合式函数（可选）
-│   └── useTauri.ts       # 封装 Tauri 调用（可选）
-├── types/                 # TypeScript 类型定义
-│   └── index.ts
-├── utils/                 # 工具函数
-│   └── tauri.ts           # 封装 Tauri invoke 调用
-├── App.vue                # 根组件（布局、导航切换）
-├── main.ts                # 入口文件
-└── vite-env.d.ts
+Lumia Launcher/
+├── src/                  # Vue 3 前端
+│   ├── components/       # 24 个视图与组件
+│   ├── i18n/             # 7 种语言
+│   ├── utils/            # tauri.ts 统一封装 invoke、svg.ts 等
+│   └── App.vue
+├── src-tauri/            # Rust 后端
+│   ├── src/              # 6 个模块
+│   ├── capabilities/     # Tauri 权限声明
+│   ├── icons/            # 各平台图标
+│   └── tauri.conf.json
+├── docs/                 # 插件语言参考、插件系统设计、开发指南
+├── public/               # 静态资源（图标、皮肤等）
+└── package.json
 ```
 
----
+## 本地开发
 
-## 🧩 核心组件职责
+### 环境要求
 
-### 1. `App.vue`
-- 提供整体布局（顶部导航 + 内容区域）
-- 维护当前显示的视图（`HomeView` / `DownloadView` / `SettingsView`）
-- 管理全局状态（如当前选中的版本、用户名等，如果需要跨组件共享）
+- [Node.js](https://nodejs.org/) 18+
+- [Rust](https://rustup.rs/) 稳定版
+- 各平台 Tauri 系统依赖（见 [Tauri 前置要求](https://tauri.app/start/prerequisites/)）
 
-### 2. `HomeView.vue`
-- 显示**已安装的版本列表**（从后端获取本地版本）
-- 提供**玩家名输入框**
-- **启动按钮**：调用 `launch_game` 命令
-- **打开游戏目录按钮**：调用 `open_folder` 命令
-- 显示**操作日志**（使用 `LogDisplay` 组件）
+### 启动
 
-### 3. `DownloadView.vue`
-- 显示**在线版本列表**（从后端获取所有可用版本）
-- **下载按钮**：调用 `download_game` 命令
-- 显示**下载进度**（通过进度条或文本反馈）
-- 显示当前选中版本所需的 Java 版本（从后端获取）
-
-### 4. `SettingsView.vue`
-- **Java 路径管理**：
-  - 自动检测 Java（调用 `get_java_paths` 显示列表）
-  - 手动输入路径（输入框 + 浏览按钮）
-- **Java 版本偏好**：下拉选择（自动 / 8 / 11 / 17 / 21 / 25）
-- **最大内存分配**：滑动条或数字输入框
-- **保存设置**：调用 `save_config` 保存所有配置
-- 加载现有配置（调用 `get_config`）
-
-### 5. `VersionSelector.vue`（可复用）
-- 下拉选择版本
-- 支持 `v-model` 绑定当前选中版本
-
-### 6. `LogDisplay.vue`
-- 显示日志列表（使用 `v-for`）
-- 自动滚动到底部（使用 `watch` 监听新日志）
-
----
-
-## 🔌 后端接口（Tauri 命令）
-
-前端通过 `@tauri-apps/api/core` 的 `invoke` 调用以下命令。  
-**请勿实现后端逻辑**，只需按照下方接口规范调用即可。
-
-| 命令名 | 参数类型 | 返回值 | 说明 |
-|--------|---------|--------|------|
-| `get_versions` | 无 | `Promise<string[]>` | 获取所有可用游戏版本（在线） |
-| `get_local_versions` | 无 | `Promise<string[]>` | 获取已下载到本地的游戏版本 |
-| `download_game` | `{ version: string }` | `Promise<void>` | 下载指定版本（会发送进度事件，见下文） |
-| `launch_game` | `{ version: string, username: string, java_path?: string, max_memory?: number }` | `Promise<void>` | 启动游戏（可覆盖配置） |
-| `open_folder` | 无 | `Promise<void>` | 打开游戏目录 |
-| `get_java_paths` | 无 | `Promise<string[]>` | 扫描系统 Java 可执行文件路径 |
-| `set_java_path` | `{ path: string }` | `Promise<void>` | 保存 Java 路径到配置 |
-| `get_config` | 无 | `Promise<{ username: string, java_path: string, max_memory: number, use_rosetta: boolean }>` | 读取当前配置 |
-| `save_config` | `{ username: string, java_path: string, max_memory: number, use_rosetta: boolean }` | `Promise<void>` | 保存配置 |
-| `get_required_java` | `{ version: string }` | `Promise<number>` | 获取某个版本所需的 Java 主版本号 |
-
-### 进度事件
-`download_game` 命令在执行过程中会通过 Tauri 的 **事件系统** 发送进度更新。前端需监听 `download-progress` 事件：
-
-```typescript
-import { listen } from '@tauri-apps/api/event';
-
-const unlisten = await listen('download-progress', (event) => {
-  const { progress, stage } = event.payload; // { progress: 0..100, stage: string }
-  // 更新进度条或日志
-});
+```bash
+git clone https://github.com/xtg44/Lumia-Launcher.git
+cd Lumia-Launcher
+npm install
+npm run tauri dev        # 启动开发窗口（前端热重载）
 ```
 
----
+### 构建安装包
 
-## 🎨 样式与主题规范
+```bash
+npm run tauri build                                    # 当前平台
 
-- **主题**：深色背景 (`#1a1a2e`)，辅以亮色强调 (`#e94560`)。  
-- **字体**：系统默认无衬线字体 (`-apple-system, 'Segoe UI', Roboto, sans-serif`)。  
-- **排版**：使用 `flex`/`grid` 保证响应式布局。  
-- **组件风格**：简洁、扁平、圆角。  
-- **统一类名**：如果使用 Tailwind，请遵循官方约定；若使用原生 CSS，建议采用 BEM 命名。
-
-### 示例颜色变量（在 `main.css` 中定义）
-
-```css
-:root {
-  --bg-primary: #1a1a2e;
-  --bg-secondary: #16213e;
-  --bg-tertiary: #0f0f1a;
-  --text-primary: #ffffff;
-  --text-secondary: #a0aec0;
-  --accent: #e94560;
-  --success: #2ecc71;
-  --warning: #f39c12;
-  --border-color: #2d2d44;
-}
+# macOS 指定架构
+rustup target add x86_64-apple-darwin                  # Intel
+npm run tauri build -- --target x86_64-apple-darwin
+npm run tauri build -- --target universal-apple-darwin # 通用包
 ```
 
----
+产物位置：
 
-## 📦 状态管理建议
+| 平台 | 路径 |
+|---|---|
+| macOS | `src-tauri/target/<triple>/release/bundle/dmg/*.dmg` |
+| Windows | `src-tauri/target/release/bundle/nsis/*.exe` |
+| Linux | `src-tauri/target/release/bundle/{deb,appimage}/*` |
 
-- **组件内状态**：使用 `ref` / `reactive`。
-- **跨组件共享**：若状态（如用户名、选中版本）在多个视图间共享，可将状态提升到 `App.vue` 并通过 `provide` / `inject` 或使用 **Pinia**（推荐）。
-- **日志列表**：建议在 `App.vue` 中维护全局日志数组，通过 `provide` 提供给所有组件，方便统一管理。
+> Windows 上交叉编译可配合 [`cargo-xwin`](https://github.com/rust-cross/cargo-xwin)：`tauri build --runner cargo-xwin --target x86_64-pc-windows-msvc`。
 
----
+## 参与贡献
 
-## 🔧 工具函数（`utils/tauri.ts`）
+欢迎提交 Issue 与 Pull Request。
 
-统一封装 Tauri `invoke` 调用，方便类型提示。
+- Bug 反馈请附上**系统版本、启动器版本、复现步骤**，涉及启动失败时请附崩溃报告或日志
+- 提交代码前请确保 `npm run build`（含 `vue-tsc` 类型检查）通过
+- 新增界面文案请同步补齐 `src/i18n/` 下的语言文件
 
-```typescript
-import { invoke } from '@tauri-apps/api/core';
+前端开发规范与后端命令接口说明见 [docs/前端开发指南.md](docs/前端开发指南.md)。
 
-export async function getVersions(): Promise<string[]> {
-  return await invoke('get_versions');
-}
+## 致谢
 
-export async function getLocalVersions(): Promise<string[]> {
-  return await invoke('get_local_versions');
-}
+开发过程中参考了以下开源项目的设计与实现，感谢各位作者与贡献者：
 
-export async function downloadGame(version: string): Promise<void> {
-  return await invoke('download_game', { version });
-}
+| 项目 | 许可证 | 参考内容 |
+|---|---|---|
+| [HMCL](https://github.com/HMCL-dev/HMCL) | GPL-3.0 | 版本解析、Terracotta 联机 |
+| [PCL2](https://github.com/Meloong-Git/PCL) | — | 交互与配置设计 |
+| [Fold Craft Launcher](https://github.com/FCL-Team/FoldCraftLauncher) | GPL-3.0 | Android 端形态参考 |
+| [Terracotta](https://github.com/burningtnt/Terracotta) | AGPL-3.0 | 联机方案 |
+| Verse | — | 界面风格参考 |
+| [BMCLAPI](https://bmclapi2.bangbang93.com/) | — | 国内下载镜像 |
 
-// ... 其余命令类似
-```
+> 上述项目**仅作设计参考，其源代码未包含在本仓库中**。
 
----
+## 许可证
 
-## 🚀 开发流程
+> ⚠️ **本项目尚未选择开源许可证。**在补充 `LICENSE` 文件之前，默认保留所有权利（All rights reserved）——这意味着他人**没有**被授予复制、修改或分发本项目的权利。
 
-1. **启动开发服务器**（自动打开 Tauri 窗口）：
-   ```bash
-   npm run tauri dev
-   ```
-2. 修改 Vue 组件，保存后**热重载**立即生效。
-3. 前端代码位于 `src/` 目录，后端 Rust 代码位于 `src-tauri/`（无需关心）。
-4. 确保所有异步操作均有错误处理，并通过日志显示错误信息。
+补充许可证前请留意：参考项目中的 **HMCL（GPL-3.0）**、**Fold Craft Launcher（GPL-3.0）**、**Terracotta（AGPL-3.0）** 均为**传染性（copyleft）**许可。若本项目包含（而非仅参考）了它们的代码，则需整体采用兼容的 copyleft 许可证；若确为独立实现，则可自由选择许可证。
 
 ---
 
-## 🤖 AI 辅助编程指南
+<div align="center">
 
-作为 AI 助手，在生成前端代码时，请遵循以下原则：
+[Minecraft](https://www.minecraft.net/) 是 Mojang Studios 的商标。本项目与 Mojang Studios 及 Microsoft 无任何关联。
 
-- **组件生成**：优先使用 `<script setup>` + TypeScript。
-- **命名约定**：组件文件使用 PascalCase（如 `HomeView.vue`），工具函数使用 camelCase。
-- **错误处理**：所有 `invoke` 调用必须包含 `try/catch`，并将错误信息推入日志。
-- **日志记录**：在每个重要操作前后（刷新、下载、启动）写入日志，格式为 `🔄 正在刷新...`、`✅ 刷新完成`、`❌ 错误信息`。
-- **API 调用**：一律通过 `utils/tauri.ts` 导出的函数进行，不要在组件中直接 `invoke`。
-- **UI 风格**：保持整体简洁、深色，符合 Lumia 品牌色调。
-- **注释**：关键逻辑添加中文注释，便于理解和维护。
-
----
-
-## 📚 参考资料
-
-- [Tauri API 文档](https://tauri.app/reference/)
-- [Vue 3 文档](https://vuejs.org/guide/introduction)
-- [TypeScript 手册](https://www.typescriptlang.org/docs/)
-
----
-
-**现在您可以开始编写或生成前端代码了！** 🚀
-所有后端命令已定义清楚，您只需专注于 UI 和交互逻辑，后端实现由开发者完成。
-重要的事情说三遍：您只需专注于前端 UI 和交互逻辑！您只需专注于前端 UI 和交互逻辑！您只需专注于前端 UI 和交互逻辑！
+</div>
