@@ -162,21 +162,6 @@ npm run tauri build -- --target universal-apple-darwin # 通用包
 
 前端开发规范与后端命令接口说明见 [docs/前端开发指南.md](docs/前端开发指南.md)。
 
-## 致谢
-
-开发过程中参考了以下开源项目的设计与实现，感谢各位作者与贡献者：
-
-| 项目 | 许可证 | 参考内容 |
-|---|---|---|
-| [HMCL](https://github.com/HMCL-dev/HMCL) | GPL-3.0 | 版本解析、Terracotta 联机 |
-| [PCL2](https://github.com/Meloong-Git/PCL) | — | 交互与配置设计 |
-| [Fold Craft Launcher](https://github.com/FCL-Team/FoldCraftLauncher) | GPL-3.0 | Android 端形态参考 |
-| [Terracotta](https://github.com/burningtnt/Terracotta) | AGPL-3.0 | 联机方案 |
-| Verse | — | 界面风格参考 |
-| [BMCLAPI](https://bmclapi2.bangbang93.com/) | — | 国内下载镜像 |
-
-> 上述项目**仅作设计参考，其源代码未包含在本仓库中**。
-
 ## 许可证
 
 > ⚠️ **本项目尚未选择开源许可证。**在补充 `LICENSE` 文件之前，默认保留所有权利（All rights reserved）——这意味着他人**没有**被授予复制、修改或分发本项目的权利。
