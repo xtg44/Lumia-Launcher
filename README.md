@@ -164,9 +164,9 @@ npm run tauri build -- --target universal-apple-darwin # 通用包
 
 ## 许可证
 
-> ⚠️ **本项目尚未选择开源许可证。**在补充 `LICENSE` 文件之前，默认保留所有权利（All rights reserved）——这意味着他人**没有**被授予复制、修改或分发本项目的权利。
-
-补充许可证前请留意：参考项目中的 **HMCL（GPL-3.0）**、**Fold Craft Launcher（GPL-3.0）**、**Terracotta（AGPL-3.0）** 均为**传染性（copyleft）**许可。若本项目包含（而非仅参考）了它们的代码，则需整体采用兼容的 copyleft 许可证；若确为独立实现，则可自由选择许可证。
+本项目采用 **MIT License** 发布，完整条款见 [LICENSE](LICENSE)。
+Copyright (c) 2026 Lumia
+你可以自由使用、修改、分发本项目，包括商业用途，只需保留版权声明与许可声明。。
 
 ---
 
