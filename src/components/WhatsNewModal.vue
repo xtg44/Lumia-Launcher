@@ -14,37 +14,42 @@ interface ChangelogEntry {
   items: string[]
 }
 
+// ⚠️ beta 3 的条目是占位文案（原文照录），非最终内容，发布前需替换并翻译。
+//    数组第 1 项必须是 en：locale 完全匹配不上时会兜底到 changelogs[1]。
 const changelogs: ChangelogEntry[] = [
   {
     lang: 'zh-CN',
-    title: 'Lumia 公测版正式发布',
+    title: 'Lumia v1.0 beta 3',
     items: [
-      'Lumia公测版正式发布了！Lumia是一款极致轻量的启动器。',
-      '好好享受吧 :)',
+      '本次更新了一些棍母。',
     ],
   },
   {
     lang: 'en',
-    title: 'Lumia Public Beta is here!',
+    title: 'Lumia v1.0 beta 3',
     items: [
-      'Lumia Public Beta is officially out — an ultra-lightweight launcher.',
-      'Enjoy! :)',
+      '本次更新了一些棍母。',
     ],
   },
   {
     lang: 'ja',
-    title: 'Lumia 公開ベータ版リリース',
+    title: 'Lumia v1.0 beta 3',
     items: [
-      'Lumia 公開ベータ版が正式にリリースされました！超軽量なランチャーです。',
-      'ぜひお楽しみください :)',
+      '本次更新了一些棍母。',
     ],
   },
   {
     lang: 'fr',
-    title: 'La bêta publique de Lumia est là !',
+    title: 'Lumia v1.0 beta 3',
     items: [
-      'La bêta publique de Lumia est officiellement sortie — un lanceur ultra-léger.',
-      'Profitez-en bien :)',
+      '本次更新了一些棍母。',
+    ],
+  },
+  {
+    lang: 'ko',
+    title: 'Lumia v1.0 beta 3',
+    items: [
+      '本次更新了一些棍母。',
     ],
   },
 ]

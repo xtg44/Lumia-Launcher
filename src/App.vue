@@ -62,6 +62,40 @@ const pluginRegistry = ref<PluginInfo[]>([])
 const sidebarVisible = ref<Record<string, boolean>>({})
 const themeColor = ref('#ffffff')
 const bgBlur = ref(Number(localStorage.getItem('lumia-bg-blur')) || 0)
+
+// ===== 动态背景（图片 / GIF / 视频）=====
+/** 视频背景是否静音：默认静音，启动器的声音只该来自音乐播放器 */
+const bgMuted = ref(localStorage.getItem('lumia-bg-muted') !== '0')
+/** 窗口失焦时暂停动态背景：省电、也避免后台白烧 GPU */
+const bgPauseOnBlur = ref(localStorage.getItem('lumia-bg-pause-blur') !== '0')
+const bgVideoRef = ref<HTMLVideoElement | null>(null)
+const windowFocused = ref(true)
+/** 系统「减少动态效果」偏好：尊重它，就不自动播放背景视频 */
+const prefersReducedMotion = ref(false)
+const prefersReducedMotionQuery = window.matchMedia('(prefers-reduced-motion: reduce)')
+
+function handleMotionPreferenceChange(e: MediaQueryListEvent) {
+  prefersReducedMotion.value = e.matches
+}
+
+function handleWindowFocus() {
+  windowFocused.value = true
+}
+
+function handleWindowBlur() {
+  windowFocused.value = false
+}
+
+function handleBgMutedChange(muted: boolean) {
+  bgMuted.value = muted
+  localStorage.setItem('lumia-bg-muted', muted ? '1' : '0')
+}
+
+function handleBgPauseOnBlurChange(pause: boolean) {
+  bgPauseOnBlur.value = pause
+  localStorage.setItem('lumia-bg-pause-blur', pause ? '1' : '0')
+}
+
 const showDownloadDetail = ref(false)
 const overallDownloadProgress = ref(0)
 const downloadDetailRef = ref<any>(null)
@@ -257,6 +291,11 @@ onMounted(() => {
   window.addEventListener('keydown', handleKeydown)
   // 禁用右键菜单
   window.addEventListener('contextmenu', (e) => e.preventDefault())
+  // 动态背景：窗口失焦时按设置暂停（省电），减少动效偏好直接不播
+  window.addEventListener('focus', handleWindowFocus)
+  window.addEventListener('blur', handleWindowBlur)
+  prefersReducedMotion.value = prefersReducedMotionQuery.matches
+  prefersReducedMotionQuery.addEventListener('change', handleMotionPreferenceChange)
   setupDragDrop()
   // 监听 Touch Bar 按钮（macOS；其他平台事件不会到达）
   listenTouchBarAction(handleTouchBarAction).then((un) => {
@@ -304,6 +343,9 @@ async function loadPluginRegistry() {
 
 onUnmounted(() => {
   window.removeEventListener('keydown', handleKeydown)
+  window.removeEventListener('focus', handleWindowFocus)
+  window.removeEventListener('blur', handleWindowBlur)
+  prefersReducedMotionQuery.removeEventListener('change', handleMotionPreferenceChange)
   if (unlistenTouchBar) {
     unlistenTouchBar()
   }
@@ -460,6 +502,45 @@ function themeImageUrl(): string {
   return convertFileSrc(tc)
 }
 
+/** 会被当作视频播放的扩展名；其余非纯色背景一律按图片处理（含 GIF / 动态 WebP） */
+const VIDEO_BG_EXT = new Set(['mp4', 'm4v', 'mov', 'webm', 'ogv', 'mkv'])
+
+function extensionOf(path: string): string {
+  const clean = path.split(/[?#]/)[0]
+  const dot = clean.lastIndexOf('.')
+  return dot >= 0 ? clean.slice(dot + 1).toLowerCase() : ''
+}
+
+/** 当前背景的媒体类型：纯色 / 图片(含动图) / 视频 */
+const bgMediaKind = computed<'none' | 'image' | 'video'>(() => {
+  if (!isImageTheme.value) return 'none'
+  return VIDEO_BG_EXT.has(extensionOf(themeColor.value)) ? 'video' : 'image'
+})
+
+const bgMediaUrl = computed(() => themeImageUrl())
+
+/** 背景视频当前是否应该处于播放状态 */
+const bgShouldPlay = computed(() => {
+  if (bgMediaKind.value !== 'video') return false
+  if (prefersReducedMotion.value) return false
+  if (bgPauseOnBlur.value && !windowFocused.value) return false
+  return true
+})
+
+/** 播放/暂停交给 watcher 统一驱动，避免 autoplay 属性在部分 webview 上被策略拦截 */
+function syncBgVideo() {
+  const el = bgVideoRef.value
+  if (!el) return
+  el.muted = bgMuted.value
+  if (bgShouldPlay.value) {
+    el.play().catch(() => {})
+  } else {
+    el.pause()
+  }
+}
+
+watch([bgShouldPlay, bgMuted, bgVideoRef], syncBgVideo, { flush: 'post' })
+
 const isDarkTheme = computed(() => {
   // 显式深色模式优先；否则按背景色亮度自动推断
   if (darkMode.value) return true
@@ -529,32 +610,45 @@ const themeStyle = computed(() => {
     '--popup-shadow': isDarkTheme.value ? '0 16px 50px rgba(0, 0, 0, 0.5)' : '0 12px 40px rgba(0, 0, 0, 0.18)',
     '--accent-color': accentColor.value,
     '--accent-text-color': accentTextColor.value,
-    background: isImageTheme.value
-      ? (isDarkTheme.value
-          ? `linear-gradient(rgba(0, 0, 0, 0.55), rgba(0, 0, 0, 0.55)), url(${themeImageUrl()})`
-          : `url(${themeImageUrl()})`)
-      : (isDarkTheme.value ? darkThemeBg.value : themeColor.value),
-    backgroundSize: isImageTheme.value ? 'cover' : 'auto',
-    backgroundPosition: isImageTheme.value ? 'center' : 'auto',
+    // 背景媒体交给 .bg-layer 承载（视频没法用 background-image），
+    // 容器本身只留一层不透明的兜底色，避免媒体加载前露出透明窗口
+    background: bgMediaKind.value === 'none'
+      ? (isDarkTheme.value ? darkThemeBg.value : themeColor.value)
+      : (isDarkTheme.value ? '#0b0b0d' : '#f5f5f7'),
     color: textColor.value
   }
 })
 
-const bgLayerStyle = computed(() => ({
-  background: isDarkTheme.value
-    ? `linear-gradient(rgba(0, 0, 0, 0.55), rgba(0, 0, 0, 0.55)), url(${themeImageUrl()})`
-    : `url(${themeImageUrl()})`,
-  backgroundSize: 'cover',
-  backgroundPosition: 'center',
-  filter: `blur(${bgBlur.value}px)`,
-  transform: 'scale(1.1)'
+/** 模糊与放大只作用于媒体本身，不作用于遮罩，否则边缘会透出虚边 */
+const bgMediaStyle = computed(() => ({
+  filter: bgBlur.value > 0 ? `blur(${bgBlur.value}px)` : 'none',
+  transform: bgBlur.value > 0 ? 'scale(1.08)' : 'none'
 }))
+
+/** 深色主题下压一层黑纱，保证浅色文字在任何背景上都读得清 */
+const bgScrim = computed(() => (isDarkTheme.value ? 'rgba(0, 0, 0, 0.55)' : 'transparent'))
 
 </script>
 
 <template>
-  <div class="app-container" :class="{ 'has-blur': isImageTheme && bgBlur > 0 }" :style="themeStyle">
-    <div v-if="isImageTheme && bgBlur > 0" class="bg-layer" :style="bgLayerStyle"></div>
+  <div class="app-container" :style="themeStyle">
+    <!-- 动态背景：图片 / GIF / 视频统一走媒体层，视频靠 muted+playsinline 才能自动播放 -->
+    <div v-if="bgMediaKind !== 'none'" class="bg-layer">
+      <video
+        v-if="bgMediaKind === 'video'"
+        ref="bgVideoRef"
+        class="bg-media"
+        :style="bgMediaStyle"
+        :src="bgMediaUrl"
+        muted
+        loop
+        playsinline
+        preload="auto"
+        @loadeddata="syncBgVideo"
+      ></video>
+      <img v-else class="bg-media" :style="bgMediaStyle" :src="bgMediaUrl" alt="" />
+      <div class="bg-scrim" :style="{ background: bgScrim }"></div>
+    </div>
     <header class="header" @mousedown.capture="handleTitlebarMouseDown">
       <div class="logo-wrapper">
         <img src="./assets/icons/Lumia.png" alt="Lumia" class="logo-image" />
@@ -603,7 +697,7 @@ const bgLayerStyle = computed(() => ({
           @back="navigateBackFromConfig"
           @confirm="addToDownloadCenter"
         />
-        <SettingsView v-else-if="currentView === 'settings'" :dark-mode="darkMode" @theme-change="handleThemeChange" @dark-mode-change="handleDarkModeChange" @sidebar-change="handleSidebarChange" @blur-change="handleBlurChange" />
+        <SettingsView v-else-if="currentView === 'settings'" :dark-mode="darkMode" :bg-media-kind="bgMediaKind" :bg-muted="bgMuted" :bg-pause-on-blur="bgPauseOnBlur" @theme-change="handleThemeChange" @dark-mode-change="handleDarkModeChange" @sidebar-change="handleSidebarChange" @blur-change="handleBlurChange" @bg-muted-change="handleBgMutedChange" @bg-pause-on-blur-change="handleBgPauseOnBlurChange" />
         <TerracottaView v-else-if="currentView === 'terracotta'" />
         <MusicView v-else-if="currentView === 'music'" />
         <AiAssistantView v-else-if="currentView === 'ai'" />
@@ -664,16 +758,35 @@ const bgLayerStyle = computed(() => ({
   clip-path: inset(0 round 20px);
 }
 
+/* 背景媒体层：z-index:-1 让它落在容器兜底色之上、所有正文（header/main-content/player-bar）之下。
+   容器已有 isolation:isolate，负层级不会被漏到窗口外面去。 */
 .bg-layer {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.bg-media {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transition: filter 0.25s ease, transform 0.25s ease;
+}
+
+.bg-scrim {
   position: absolute;
   inset: 0;
   pointer-events: none;
 }
 
-.app-container.has-blur .header,
-.app-container.has-blur .main-content {
-  position: relative;
-  z-index: 1;
+/* 尊重系统「减少动态效果」：不放大，也不给背景任何过渡 */
+@media (prefers-reduced-motion: reduce) {
+  .bg-media {
+    transition: none;
+  }
 }
 
 /* 注意：header、sidebar 等仍然需要背景色，否则内容不可见 */

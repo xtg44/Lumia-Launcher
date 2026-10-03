@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Lumia Launcher",
-  "version": "1.0.0-beta.1",
+  "version": "1.0.0-beta.3",
   "identifier": "com.xiaotiangua.lumia",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -31,7 +31,14 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self' ipc: http://ipc.localhost http://127.0.0.1:1420 stream:; img-src 'self' data: https: http://127.0.0.1:1420 asset: http://asset.localhost; media-src 'self' stream: data: blob:; style-src 'unsafe-inline' 'self' https: http://127.0.0.1:1420; script-src 'unsafe-inline' 'unsafe-eval' 'self' https: http://127.0.0.1:1420;"
+      "csp": "default-src 'self' ipc: http://ipc.localhost http://127.0.0.1:1420 stream:; img-src 'self' data: https: http://127.0.0.1:1420 asset: http://asset.localhost; media-src 'self' stream: data: blob: asset: http://asset.localhost; style-src 'unsafe-inline' 'self' https: http://127.0.0.1:1420; script-src 'unsafe-inline' 'unsafe-eval' 'self' https: http://127.0.0.1:1420;",
+      "assetProtocol": {
+        "enable": true,
+        "scope": {
+          "allow": ["$DATA/Lumia/**"],
+          "requireLiteralLeadingDot": false
+        }
+      }
     }
   },
   "bundle": {

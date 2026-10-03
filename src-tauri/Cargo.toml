@@ -1,6 +1,6 @@
 [package]
 name = "lumia-launcher"
-version = "1.0.0-beta.1"
+version = "1.0.0-beta.3"
 edition = "2021"
 license = "MIT"
 description = "Lumia Launcher — 跨平台 Minecraft 启动器（Tauri 2 + Rust + Vue 3）"
@@ -11,7 +11,9 @@ default = ["custom-protocol"]
 custom-protocol = ["tauri/custom-protocol"]
 
 [dependencies]
-tauri = { version = "2", features = ["custom-protocol", "macos-private-api"] }
+# protocol-asset：本地文件（背景图/动图/视频、插件图标）需要它才能通过 asset:// 被 webview 读取，
+# 同时带来 http-range，<video> 的分段拉取/拖动进度依赖它。
+tauri = { version = "2", features = ["custom-protocol", "macos-private-api", "protocol-asset"] }
 tauri-plugin-dialog = "2"
 tauri-plugin-opener = "2"
 serde = { version = "1", features = ["derive"] }
@@ -19,6 +21,7 @@ serde_json = "1"
 tokio = { version = "1", features = ["full"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls", "http2", "charset", "system-proxy"] }
 sha1 = "0.10"
+sha2 = "0.10"
 md5 = "0.7"
 hex = "0.4"
 glob = "0.3"

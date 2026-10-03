@@ -7,7 +7,7 @@
 **跨平台 Minecraft 启动器** · Tauri 2 + Rust + Vue 3
 
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-4c6ef5?style=flat-square)](#下载安装)
-[![Version](https://img.shields.io/badge/version-1.0.0--beta.1-e94560?style=flat-square)](#下载安装)
+[![Version](https://img.shields.io/badge/version-1.0.0--beta.3-e94560?style=flat-square)](#下载安装)
 [![Tauri](https://img.shields.io/badge/Tauri-2-24C8DB?style=flat-square&logo=tauri&logoColor=white)](https://tauri.app/)
 [![Vue](https://img.shields.io/badge/Vue-3-42b883?style=flat-square&logo=vuedotjs&logoColor=white)](https://vuejs.org/)
 [![Rust](https://img.shields.io/badge/Rust-stable-000000?style=flat-square&logo=rust&logoColor=white)](https://www.rust-lang.org/)
@@ -72,7 +72,7 @@ Lumia Launcher 是一个用 **Rust + Tauri 2** 构建的轻量跨平台 Minecraf
 | macOS 10.15+ | `.dmg`（Apple Silicon / Intel） |
 | Linux | 见官网说明 |
 
-> 当前为 **v1.0.0-beta.1** 测试版，功能与接口可能变动，欢迎反馈问题。
+> 当前为 **v1.0.0-beta.3** 测试版，功能与接口可能变动，欢迎反馈问题。
 
 ## 技术栈
 

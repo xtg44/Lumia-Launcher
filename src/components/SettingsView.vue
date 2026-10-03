@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
-import { getConfig, saveConfig, getJavaPaths, getAppVersion, listAiModels, saveBackgroundImage, removeBackgroundImage, downloadFile, listenDownloadFileProgress } from '../utils/tauri'
+import { getConfig, saveConfig, getJavaPaths, getAppVersion, listAiModels, importBackgroundMedia, removeBackgroundImage, downloadFile, listenDownloadFileProgress } from '../utils/tauri'
 import { useI18n } from 'vue-i18n'
 import { resolveLocale, applyLocale } from '../i18n'
 import { toast } from '../utils/toast'
@@ -15,15 +15,25 @@ const emit = defineEmits<{
   (e: 'dark-mode-change', enabled: boolean): void
   (e: 'sidebar-change'): void
   (e: 'blur-change', blur: number): void
+  (e: 'bg-muted-change', muted: boolean): void
+  (e: 'bg-pause-on-blur-change', pause: boolean): void
 }>()
 
 const props = defineProps<{
   darkMode?: boolean
+  /** 当前背景的媒体类型，用于决定要不要显示「仅视频可用」的选项 */
+  bgMediaKind?: 'none' | 'image' | 'video'
+  bgMuted?: boolean
+  bgPauseOnBlur?: boolean
 }>()
 
 const javaPath = ref('')
 const gameDir = ref('')
 const autoUpdate = ref(true)
+/** 发现新版本后自动后台下载（下载不影响使用，安装仍需确认） */
+const autoDownloadUpdate = ref(true)
+/** 下载完成后自动退出安装并重启（默认关，避免打断正在游戏的用户） */
+const autoRestartUpdate = ref(false)
 const SIDEBAR_KEYS = ['home', 'version', 'download', 'terracotta', 'music', 'ai', 'pluginCenter', 'settings'] as const
 const sidebarVisible = ref<Record<string, boolean>>({})
 const javaArgs = ref('')
@@ -36,6 +46,17 @@ const customBgPreviewUrl = computed(() => {
   return convertFileSrc(bg)
 })
 const bgBlur = ref(Number(localStorage.getItem('lumia-bg-blur')) || 0)
+const bgPicking = ref(false)
+
+/** 系统文件选择器的扩展名白名单（需与后端 import_background_media 的白名单一致） */
+const BACKGROUND_EXTENSIONS = [
+  'png', 'jpg', 'jpeg', 'webp', 'bmp', 'avif',
+  'gif',
+  'mp4', 'm4v', 'mov', 'webm', 'ogv', 'mkv',
+]
+
+/** 预览是不是视频（GIF 归图片，<img> 自己会动，不需要 <video>） */
+const customBgIsVideo = computed(() => props.bgMediaKind === 'video')
 
 // 工具箱 - 下载器
 const dlUrl = ref('')
@@ -129,6 +150,8 @@ async function loadConfig() {
     aiModel.value = (config.ai_model as string) || ''
     aiProvider.value = (config.ai_provider as string) || matchAiProvider(aiBaseUrl.value)
     autoUpdate.value = config.auto_update !== false
+    autoDownloadUpdate.value = config.auto_download_update !== false
+    autoRestartUpdate.value = config.auto_restart_update === true
     javaArgs.value = (config.java_args as string) || ''
     sidebarVisible.value = (config.sidebar_visible as Record<string, boolean>) || {}
     // 恢复自定义背景/主题色
@@ -218,11 +241,13 @@ async function saveGameDir() {
   }
 }
 
-/** 保存「自动检查更新」开关（静默失败，不打扰用户） */
+/** 保存更新相关的三个开关（静默失败，不打扰用户） */
 async function saveAutoUpdate() {
   try {
     const config = await getConfig()
     config.auto_update = autoUpdate.value
+    config.auto_download_update = autoDownloadUpdate.value
+    config.auto_restart_update = autoRestartUpdate.value
     await saveConfig(config)
   } catch {
     // 静默失败
@@ -291,27 +316,29 @@ const handleThemeSelect = async (color: string) => {
   emit('theme-change', color)
 }
 
-const handlePhotoUpload = (event: Event) => {
-  const target = event.target as HTMLInputElement
-  const file = target.files?.[0]
-  if (file) {
-    const reader = new FileReader()
-    reader.onload = async (e) => {
-      const dataUrl = e.target?.result as string
-      const base64 = dataUrl.split(',')[1]
-      if (!base64) {
-        toast(t('settings.saveFailed', { msg: '图片数据无效' }), 'error')
-        return
-      }
-      try {
-        const savedPath = await saveBackgroundImage(base64, file.name)
-        customBackground.value = savedPath
-        emit('theme-change', savedPath)
-      } catch (err) {
-        toast(t('settings.saveFailed', { msg: String(err) }), 'error')
-      }
-    }
-    reader.readAsDataURL(file)
+/**
+ * 挑一个背景媒体文件（图片 / GIF / 视频）。
+ *
+ * 走「系统选择器拿路径 → 后端复制」而不是 <input type="file"> + FileReader：
+ * 后者要把整个文件读成 base64（体积膨胀 33%）再塞进 IPC，几百 MB 的视频必然把 webview 卡死。
+ */
+const pickBackgroundMedia = async () => {
+  if (bgPicking.value) return
+  bgPicking.value = true
+  try {
+    const { open } = await import('@tauri-apps/plugin-dialog')
+    const selected = await open({
+      multiple: false,
+      filters: [{ name: t('settings.bgMediaFilter'), extensions: BACKGROUND_EXTENSIONS }],
+    })
+    if (!selected || Array.isArray(selected)) return
+    const savedPath = await importBackgroundMedia(selected)
+    customBackground.value = savedPath
+    emit('theme-change', savedPath)
+  } catch (err) {
+    toast(t('settings.saveFailed', { msg: String(err) }), 'error')
+  } finally {
+    bgPicking.value = false
   }
 }
 
@@ -419,11 +446,11 @@ async function loadVersion() {
   try {
     appVersion.value = formatAppVersion(await getAppVersion())
   } catch {
-    appVersion.value = 'v1.0 beta 1'
+    appVersion.value = 'v1.0 beta 3'
   }
 }
 
-/** 语义化版本号 (1.0.0-beta.1) → 展示文本 (v1.0 beta 1) */
+/** 语义化版本号 (1.0.0-beta.3) → 展示文本 (v1.0 beta 3) */
 function formatAppVersion(v: string): string {
   const m = v.match(/^(\d+)\.(\d+)\.(\d+)(?:-([a-zA-Z]+)\.?(\d+))?$/)
   if (!m) return v
@@ -493,14 +520,23 @@ function handleVersionClick(e: MouseEvent) {
         <div class="setting-label">{{ t('settings.customBg') }}</div>
         <div class="custom-bg-area">
           <div v-if="customBackground" class="bg-preview">
-            <img :src="customBgPreviewUrl" :alt="t('settings.customBg')" class="bg-image" />
+            <video
+              v-if="customBgIsVideo"
+              :src="customBgPreviewUrl"
+              class="bg-image"
+              muted
+              loop
+              playsinline
+              autoplay
+            ></video>
+            <img v-else :src="customBgPreviewUrl" :alt="t('settings.customBg')" class="bg-image" />
             <button class="remove-bg-btn" @click="removeCustomBackground">{{ t('settings.remove') }}</button>
           </div>
-          <label v-else class="upload-btn">
-            <input type="file" accept="image/*" @change="handlePhotoUpload" class="file-input" />
+          <button v-else type="button" class="upload-btn" :disabled="bgPicking" @click="pickBackgroundMedia">
             <span class="upload-icon">+</span>
-            <span class="upload-text">{{ t('settings.uploadPhoto') }}</span>
-          </label>
+            <span class="upload-text">{{ bgPicking ? t('settings.bgImporting') : t('settings.uploadMedia') }}</span>
+            <span class="upload-hint">{{ t('settings.uploadMediaHint') }}</span>
+          </button>
         </div>
         <div v-if="customBackground" class="blur-slider-row">
           <span class="setting-label">{{ t('settings.bgBlur') }}</span>
@@ -514,6 +550,32 @@ function handleVersionClick(e: MouseEvent) {
           />
           <span class="blur-value">{{ bgBlur }}px</span>
         </div>
+        <div v-if="customBackground" class="setting-hint">{{ t('settings.bgReadabilityHint') }}</div>
+      </div>
+
+      <!-- 静音/失焦暂停只对视频背景有意义，图片与 GIF 不显示 -->
+      <div v-if="customBackground && customBgIsVideo" class="setting-card">
+        <label class="toggle-switch full">
+          <input
+            type="checkbox"
+            :checked="!!props.bgMuted"
+            @change="(e) => emit('bg-muted-change', (e.target as HTMLInputElement).checked)"
+          />
+          <span class="slider"></span>
+          <span class="toggle-label">{{ t('settings.bgMuted') }}</span>
+        </label>
+      </div>
+
+      <div v-if="customBackground && customBgIsVideo" class="setting-card">
+        <label class="toggle-switch full">
+          <input
+            type="checkbox"
+            :checked="!!props.bgPauseOnBlur"
+            @change="(e) => emit('bg-pause-on-blur-change', (e.target as HTMLInputElement).checked)"
+          />
+          <span class="slider"></span>
+          <span class="toggle-label">{{ t('settings.bgPauseOnBlur') }}</span>
+        </label>
       </div>
     </div>
 
@@ -565,6 +627,22 @@ function handleVersionClick(e: MouseEvent) {
           <input type="checkbox" v-model="autoUpdate" @change="saveAutoUpdate" />
           <span class="slider"></span>
           <span class="toggle-label">{{ t('settings.autoUpdate') }}</span>
+        </label>
+      </div>
+
+      <div class="setting-card">
+        <label class="toggle-switch full">
+          <input type="checkbox" v-model="autoDownloadUpdate" @change="saveAutoUpdate" />
+          <span class="slider"></span>
+          <span class="toggle-label">{{ t('settings.autoDownloadUpdate') }}</span>
+        </label>
+      </div>
+
+      <div class="setting-card">
+        <label class="toggle-switch full">
+          <input type="checkbox" v-model="autoRestartUpdate" @change="saveAutoUpdate" />
+          <span class="slider"></span>
+          <span class="toggle-label">{{ t('settings.autoRestartUpdate') }}</span>
         </label>
       </div>
     </div>
@@ -705,22 +783,24 @@ function handleVersionClick(e: MouseEvent) {
       </div>
     </div>
 
-    <div v-if="showSponsor" class="sponsor-overlay" @click.self="showSponsor = false">
-      <div class="sponsor-modal">
-        <button class="sponsor-close" @click="showSponsor = false">✕</button>
-        <h3 class="sponsor-title">{{ t('settings.sponsorTitle') }}</h3>
-        <div class="sponsor-images">
-          <div class="sponsor-item">
-            <img src="@/assets/icons/WechatPay.JPG" alt="WeChat Pay" />
-            <span>微信支付</span>
-          </div>
-          <div class="sponsor-item">
-            <img src="@/assets/icons/Alipay.JPG" alt="Alipay" />
-            <span>支付宝</span>
+    <Transition name="modal">
+      <div v-if="showSponsor" class="sponsor-overlay" @click.self="showSponsor = false">
+        <div class="sponsor-modal">
+          <button class="sponsor-close" @click="showSponsor = false">✕</button>
+          <h3 class="sponsor-title">{{ t('settings.sponsorTitle') }}</h3>
+          <div class="sponsor-images">
+            <div class="sponsor-item">
+              <img src="@/assets/icons/WechatPay.JPG" alt="WeChat Pay" />
+              <span>微信支付</span>
+            </div>
+            <div class="sponsor-item">
+              <img src="@/assets/icons/Alipay.JPG" alt="Alipay" />
+              <span>支付宝</span>
+            </div>
           </div>
         </div>
       </div>
-    </div>
+    </Transition>
   </div>
 </template>
 
@@ -892,17 +972,25 @@ function handleVersionClick(e: MouseEvent) {
   height: 100px;
   border: 2px dashed var(--border-color);
   border-radius: 8px;
+  /* 现在是 <button>，把浏览器默认外观清掉，保持原来 <label> 的观感 */
+  background: transparent;
+  font: inherit;
+  color: inherit;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 8px;
+  gap: 6px;
   cursor: pointer;
   transition: border-color 0.2s, background-color 0.2s;
 }
-.upload-btn:hover {
+.upload-btn:hover:not(:disabled) {
   border-color: var(--accent-color);
   background: rgba(0, 0, 0, 0.05);
+}
+.upload-btn:disabled {
+  cursor: default;
+  opacity: 0.6;
 }
 .upload-icon {
   font-size: 24px;
@@ -913,8 +1001,13 @@ function handleVersionClick(e: MouseEvent) {
   font-size: 14px;
   color: var(--label-color);
 }
-.file-input {
-  display: none;
+.upload-hint {
+  font-size: 11px;
+  line-height: 15px;
+  color: var(--label-color);
+  opacity: 0.75;
+  text-align: center;
+  padding: 0 12px;
 }
 .toggle-switch {
   display: flex;
@@ -1072,7 +1165,11 @@ function handleVersionClick(e: MouseEvent) {
   font-weight: 600;
   color: var(--text-color);
   cursor: pointer;
-  transition: opacity 0.2s;
+  transition: background-color 0.2s, transform 100ms ease;
+}
+.sponsor-btn:active {
+  transform: scale(0.97);
+  background-color: var(--button-active);
 }
 
 .sponsor-overlay {
@@ -1096,6 +1193,14 @@ function handleVersionClick(e: MouseEvent) {
   position: relative;
   box-shadow: var(--popup-shadow);
 }
+/* Transition：与 UpdateModal / WhatsNewModal 保持同一套 */
+.modal-enter-active { transition: opacity 0.25s ease; }
+.modal-leave-active { transition: opacity 0.2s ease; }
+.modal-enter-from, .modal-leave-to { opacity: 0; }
+.modal-enter-active .sponsor-modal { transition: transform 0.25s cubic-bezier(0.34, 1.2, 0.64, 1); }
+.modal-leave-active .sponsor-modal { transition: transform 0.2s ease; }
+.modal-enter-from .sponsor-modal { transform: scale(0.9) translateY(10px); }
+.modal-leave-to .sponsor-modal { transform: scale(0.95) translateY(5px); }
 .sponsor-close {
   position: absolute;
   top: 12px;
@@ -1135,5 +1240,14 @@ function handleVersionClick(e: MouseEvent) {
 .sponsor-item span {
   font-size: 13px;
   color: var(--label-color);
+}
+
+/* 必须放在赞助样式之后：与 .sponsor-btn:active 同权重，靠源码顺序取胜 */
+@media (prefers-reduced-motion: reduce) {
+  .sponsor-btn:active { transform: none; }
+  .modal-enter-active,
+  .modal-leave-active,
+  .modal-enter-active .sponsor-modal,
+  .modal-leave-active .sponsor-modal { transition: none; }
 }
 </style>

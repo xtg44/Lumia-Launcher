@@ -6,6 +6,7 @@ mod music;
 mod plugins;
 #[cfg(target_os = "macos")]
 mod touchbar;
+mod updater;
 
 use auth::DeviceCodeState;
 use futures_util::StreamExt;
@@ -121,6 +122,12 @@ pub struct AppConfig {
     /// 自动检查更新（启动时请求官方版本 API，发现新版本弹窗提示）
     #[serde(default = "default_true")]
     pub auto_update: bool,
+    /// 发现新版本后在后台静默下载（下载不影响使用，安装仍需用户确认）
+    #[serde(default = "default_true")]
+    pub auto_download_update: bool,
+    /// 下载完成后自动退出并安装重启（默认关 —— 不打断正在游戏的用户）
+    #[serde(default = "default_false")]
+    pub auto_restart_update: bool,
     /// 用户自定义 Java 启动参数（设置→高级设置），空格分隔
     #[serde(default)]
     pub java_args: String,
@@ -141,6 +148,10 @@ pub struct AppConfig {
 
 fn default_true() -> bool {
     true
+}
+
+fn default_false() -> bool {
+    false
 }
 
 fn default_last_seen_version() -> String {
@@ -193,6 +204,8 @@ impl Default for AppConfig {
             ai_provider: "deepseek".to_string(),
             last_seen_version: String::new(),
             auto_update: true,
+            auto_download_update: true,
+            auto_restart_update: false,
             java_args: String::new(),
             ever_launched_online: false,
             known_mainland: None,
@@ -7756,6 +7769,72 @@ fn lumia_data_dir() -> PathBuf {
     }
 }
 
+/// 自定义背景允许的扩展名：静态图 / 动图（GIF、动态 WebP）/ 视频。
+/// 白名单而不是黑名单——背景文件会被 webview 直接解码，不该让任意扩展名进来。
+const BACKGROUND_MEDIA_EXT: &[&str] = &[
+    // 静态图
+    "png", "jpg", "jpeg", "webp", "bmp", "avif",
+    // 动图
+    "gif",
+    // 视频
+    "mp4", "m4v", "mov", "webm", "ogv", "mkv",
+];
+
+/// 背景文件在 Lumia 数据目录中的固定前缀（带点，保持与历史版本一致）
+const BACKGROUND_MEDIA_STEM: &str = ".lumia_background";
+
+/// 清掉数据目录里所有历史背景文件（含无点前缀的旧命名）。
+/// png → mp4 这种换类型上传如果不清理，会留下永远不会被读到的孤儿文件。
+fn prune_background_media(dir: &Path) {
+    let Ok(entries) = fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let name = entry.file_name().to_string_lossy().to_string();
+        let bare = name.strip_prefix('.').unwrap_or(&name);
+        // 匹配 ".lumia_background.<ext>" 与 "lumia_background.<ext>"，不误伤同前缀的其它文件
+        let is_background = match bare.strip_prefix(BACKGROUND_MEDIA_STEM.trim_start_matches('.')) {
+            Some(rest) => rest.starts_with('.'),
+            None => false,
+        };
+        if is_background {
+            let _ = fs::remove_file(entry.path());
+        }
+    }
+}
+
+/// 导入背景媒体：把用户选中的本地文件复制进 Lumia 数据目录，返回可直接给 asset:// 用的绝对路径。
+///
+/// 走「路径 → 复制」而不是 base64 IPC：视频动辄上百 MB，base64 会把内存膨胀 33%
+/// 并且整份塞进 IPC 消息里，必然卡死 webview。
+#[tauri::command]
+async fn import_background_media(source_path: String) -> Result<String, String> {
+    let src = PathBuf::from(&source_path);
+    if !src.is_file() {
+        return Err("文件不存在，或选中的不是一个文件".to_string());
+    }
+
+    let ext = src
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.to_ascii_lowercase())
+        .ok_or_else(|| "无法识别文件类型".to_string())?;
+    if !BACKGROUND_MEDIA_EXT.contains(&ext.as_str()) {
+        return Err(format!("不支持的背景文件类型：.{}", ext));
+    }
+
+    let lumia_dir = lumia_data_dir();
+    fs::create_dir_all(&lumia_dir).map_err(|e| format!("创建目录失败: {}", e))?;
+
+    // 先清旧、再落新：避免新旧文件同时存在时读到过期的那份
+    prune_background_media(&lumia_dir);
+
+    let dest = lumia_dir.join(format!("{}.{}", BACKGROUND_MEDIA_STEM, ext));
+    fs::copy(&src, &dest).map_err(|e| format!("复制文件失败: {}", e))?;
+
+    Ok(dest.to_string_lossy().to_string())
+}
+
 /// 将 base64 图片解码并保存到 Lumia 数据目录，返回文件路径
 #[tauri::command]
 async fn save_background_image(
@@ -7774,7 +7853,8 @@ async fn save_background_image(
         .extension()
         .and_then(|e| e.to_str())
         .unwrap_or("png");
-    let filename = format!(".lumia_background.{}", ext);
+    prune_background_media(&lumia_dir);
+    let filename = format!("{}.{}", BACKGROUND_MEDIA_STEM, ext);
     let dest = lumia_dir.join(&filename);
 
     fs::write(&dest, &data).map_err(|e| format!("写入图片失败: {}", e))?;
@@ -8046,8 +8126,9 @@ async fn mark_changelog_seen(app_handle: tauri::AppHandle, version: String) -> R
 // ========== 7.3 自动检查更新（官方 API https://lumialauncher.cn/api.php?action=version） ==========
 
 /// 与官方 API 同格式的当前版本标识（API 返回如 "v1.0 beta 1"）。
-/// Cargo 版本 "1.0.0-beta.1" 与 "v1.0 beta 1" 是同一个版本，统一用它做比较基准。
-const CURRENT_VERSION_LABEL: &str = "v1.0 beta 1";
+/// Cargo 版本 "1.0.0-beta.3" 与 "v1.0 beta 3" 是同一个版本，统一用它做比较基准。
+/// 注意：比较函数只抽取数字序列，所以这里的空格/写法不影响更新判定。
+const CURRENT_VERSION_LABEL: &str = "v1.0 beta 3";
 
 /// 提取版本字符串中的数字序列："v1.0 beta 1" → [1,0,1]；"1.1.0" → [1,1,0]
 fn version_num_vec(s: &str) -> Vec<i32> {
@@ -8086,6 +8167,12 @@ struct UpdateCheckResult {
     mac_download: Option<String>,
     /// 已按当前运行平台解析好的最终下载地址（前端直接用它）
     download_url: Option<String>,
+    /// 自更新包（服务端还没提供新字段时为 null → 前端退回「打开浏览器下载」）
+    update_package: Option<updater::UpdatePackage>,
+    /// 自更新能力：路径安全闸门 + 安装目录可写性
+    capability: updater::UpdateCapability,
+    /// 上一次自动更新失败的原因（读取后即清空，避免反复提示）
+    last_apply_error: Option<String>,
 }
 
 /// 请求官方版本 API，比对当前版本，返回是否有新版本（失败时返回错误，前端静默忽略）
@@ -8149,6 +8236,9 @@ async fn check_for_updates() -> Result<UpdateCheckResult, String> {
     let current_nums = version_num_vec(&current);
     let has_update = !latest.is_empty() && version_greater(&latest_nums, &current_nums);
 
+    // 自更新包：服务端没给（老 API）就是 None，前端自动退回「打开浏览器下载」
+    let update_package = updater::pick_package(v);
+
     Ok(UpdateCheckResult {
         has_update,
         current,
@@ -8161,7 +8251,179 @@ async fn check_for_updates() -> Result<UpdateCheckResult, String> {
         win_download,
         mac_download,
         download_url,
+        update_package,
+        capability: updater::detect_capability(),
+        last_apply_error: updater::take_last_error(),
     })
+}
+
+// ========== 7.4 应用自更新 ==========
+//
+// 三段式设计，对应前端的三个状态：
+//   1. self_update_prepare —— 下载 + 校验 + 解压到工作目录，返回就绪信息（可重复调用/覆盖）
+//   2. self_update_apply   —— 派发 helper 并退出应用，之后由 helper 完成替换
+//   3. self_update_discard —— 用户点了「稍后再说」，丢掉已下载的包
+//
+// 关键：**替换发生在应用退出之后**（详见 updater 模块头注释）。
+
+/// 已就绪的更新包
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PreparedUpdate {
+    version: String,
+    /// 就绪位置（.app / 新 exe），仅用于展示
+    staged: String,
+    /// 解压后的字节数（0 表示未知）
+    staged_bytes: u64,
+    /// 目标安装位置
+    target: String,
+}
+
+fn dir_size(path: &Path) -> u64 {
+    if path.is_file() {
+        return fs::metadata(path).map(|m| m.len()).unwrap_or(0);
+    }
+    let Ok(entries) = fs::read_dir(path) else {
+        return 0;
+    };
+    entries
+        .flatten()
+        .map(|e| {
+            let p = e.path();
+            if p.is_dir() {
+                dir_size(&p)
+            } else {
+                fs::metadata(&p).map(|m| m.len()).unwrap_or(0)
+            }
+        })
+        .sum()
+}
+
+/// 下载更新包到工作目录（含校验与解压）。任何一步失败都会清掉半个包，保证幂等。
+#[tauri::command]
+async fn self_update_prepare(
+    window: Window,
+    url: String,
+    sha256: Option<String>,
+    version: String,
+) -> Result<PreparedUpdate, String> {
+    // 闸门先过：位置不对就别浪费时间下载
+    let target = updater::resolve_target()?;
+
+    // 版本号会被拼进路径，先清洗；同时防止构造出越界路径
+    let version = updater::safe_version(&version);
+    if version.is_empty() {
+        return Err("版本号为空，无法准备更新".into());
+    }
+
+    let workdir = updater::workdir_for(&version);
+
+    // 已经就绪的同一版本（用户上次点了「稍后再说」）→ 直接复用，不重复下载
+    if let Ok(plan) = updater::ApplyPlan::load_for(&version) {
+        return Ok(PreparedUpdate {
+            version: version.clone(),
+            staged_bytes: dir_size(&plan.staged),
+            staged: plan.staged.display().to_string(),
+            target: plan.target.display().to_string(),
+        });
+    }
+
+    updater::clear_workspace();
+    fs::create_dir_all(&workdir).map_err(|e| format!("创建更新目录失败: {}", e))?;
+
+    let fail = |msg: String, workdir: &PathBuf| -> String {
+        let _ = fs::remove_dir_all(workdir);
+        msg
+    };
+
+    // 1) 下载（复用工具箱那套 32 线程分段下载 + 进度事件）
+    let pkg_name = if cfg!(target_os = "macos") {
+        "package.zip"
+    } else {
+        "lumia-launcher.new.exe"
+    };
+    let pkg = workdir.join(pkg_name);
+    download_file(
+        url.clone(),
+        pkg.to_string_lossy().to_string(),
+        window.clone(),
+    )
+    .await
+    .map_err(|e| fail(format!("下载失败: {}", e), &workdir))?;
+
+    let bytes = fs::metadata(&pkg).map(|m| m.len()).unwrap_or(0);
+    if bytes == 0 {
+        return Err(fail("下载到的文件是空的".into(), &workdir));
+    }
+
+    // 2) 完整性校验（服务端给了哈希才校验；没给就只能靠 HTTPS）
+    if let Some(expected) = sha256.as_deref().map(|s| s.trim().to_lowercase()) {
+        if !expected.is_empty() {
+            let _ = window.emit(
+                "self-update-stage",
+                json!({ "stage": "verifying", "message": "正在校验文件完整性..." }),
+            );
+            let actual = updater::sha256_file(&pkg).map_err(|e| fail(e, &workdir))?;
+            if actual != expected {
+                return Err(fail(
+                    "文件校验失败（可能与服务端描述不一致），已删除，请重试".into(),
+                    &workdir,
+                ));
+            }
+        }
+    }
+
+    // 3) 就位准备
+    #[cfg(target_os = "macos")]
+    let staged = {
+        let _ = window.emit(
+            "self-update-stage",
+            json!({ "stage": "extracting", "message": "正在解压..." }),
+        );
+        let stage = workdir.join("stage");
+        updater::extract_macos_package(&pkg, &stage).map_err(|e| fail(e, &workdir))?
+    };
+
+    #[cfg(target_os = "windows")]
+    let staged = {
+        updater::verify_windows_exe(&pkg).map_err(|e| fail(e, &workdir))?;
+        pkg.clone()
+    };
+
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    let staged = {
+        return Err("当前平台暂不支持自动更新".into());
+    };
+
+    // 4) 落盘更新计划（apply 时按它执行，且会重新校验，不信任前端传参）
+    let plan = updater::ApplyPlan {
+        version: version.clone(),
+        target: target.bundle.clone(),
+        staged: staged.clone(),
+        workdir: workdir.clone(),
+        created_at: updater::now_secs(),
+    };
+    plan.save(&workdir).map_err(|e| fail(e, &workdir))?;
+
+    Ok(PreparedUpdate {
+        version,
+        staged: staged.display().to_string(),
+        staged_bytes: dir_size(&staged),
+        target: target.bundle.display().to_string(),
+    })
+}
+
+/// 派发 helper 并退出应用 —— 调用后本进程就不再存在了
+#[tauri::command]
+async fn self_update_apply(app: tauri::AppHandle, version: String) -> Result<(), String> {
+    let plan = updater::ApplyPlan::load_for(&version)?;
+    updater::spawn_helper(&plan)?;
+
+    // 给前端的 invoke 留一点返回时间，然后立刻退出：
+    // 主进程退出后安装目录里的文件才真正没人占用
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    app.exit(0);
+    Ok(())
 }
 
 // ========== 8. 扫描 Java 路径 ==========
@@ -8465,6 +8727,14 @@ async fn touchbar_update_active_items(app: tauri::AppHandle, active: Vec<String>
 
 // ========== 主函数 ==========
 fn main() {
+    // 自更新 helper 模式：本进程是被上一版派发出来做替换的，不是正常启动应用。
+    // 必须早于任何 Tauri 初始化 —— 它只是同一个二进制换了入口。
+    if let Some(code) = updater::run_helper_if_requested() {
+        std::process::exit(code);
+    }
+    // 清掉上次更新留下的残留（Windows 的 .old 文件与 helper 副本）
+    updater::cleanup_leftovers();
+
     // Lumia 专属游戏目录（mac/win/linux 各自独立，不与任何其他启动器共用）
     let game_dir = default_game_dir();
 
@@ -8584,6 +8854,8 @@ fn main() {
             get_app_version,
             mark_changelog_seen,
             check_for_updates,
+            self_update_prepare,
+            self_update_apply,
             get_java_paths,
             get_required_java,
             start_device_auth,
@@ -8634,6 +8906,7 @@ fn main() {
             plugins::plugin_delete,
             plugins::plugin_open_dir,
             save_background_image,
+            import_background_media,
             remove_background_image,
             download_file,
         ])

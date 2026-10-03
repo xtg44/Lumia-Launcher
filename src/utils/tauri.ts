@@ -164,6 +164,11 @@ export async function saveBackgroundImage(base64Data: string, fileName: string):
   return await invoke('save_background_image', { base64Data, fileName })
 }
 
+/** 导入背景媒体（图片 / GIF / 视频）：传本机路径，后端复制进 Lumia 数据目录并返回新路径 */
+export async function importBackgroundMedia(sourcePath: string): Promise<string> {
+  return await invoke('import_background_media', { sourcePath })
+}
+
 export async function removeBackgroundImage(path: string): Promise<void> {
   return await invoke('remove_background_image', { path })
 }
@@ -567,6 +572,22 @@ export async function getAppVersion(): Promise<string> {
   return await invoke('get_app_version')
 }
 
+/** 服务端提供的自更新包（未提供时为 null → 退回「打开浏览器下载」） */
+export interface UpdatePackageInfo {
+  url: string
+  /** SHA-256（十六进制）；null 表示服务端未提供，跳过校验只靠 HTTPS */
+  sha256: string | null
+  size: number
+}
+
+/** 自更新能力：路径安全闸门 + 安装目录可写性 */
+export interface UpdateCapability {
+  supported: boolean
+  /** 不支持时的人类可读原因 */
+  reason: string | null
+  installPath: string | null
+}
+
 export interface UpdateCheckInfo {
   hasUpdate: boolean
   current: string
@@ -581,11 +602,58 @@ export interface UpdateCheckInfo {
   macDownload: string | null
   /** 后端已按当前运行平台解析好的下载地址，优先使用 */
   downloadUrl: string | null
+  /** 自更新包；null 时前端走「打开浏览器下载」 */
+  updatePackage: UpdatePackageInfo | null
+  /** 自更新能力（路径闸门） */
+  capability: UpdateCapability
+  /** 上一次自动更新失败的原因（后端读取后即清空） */
+  lastApplyError: string | null
 }
 
 /** 自动检查新版本（后端请求官方版本 API 并比较） */
 export async function checkForUpdates(): Promise<UpdateCheckInfo> {
   return await invoke('check_for_updates')
+}
+
+/** 已下载并就绪的更新包 */
+export interface PreparedUpdate {
+  version: string
+  /** 就绪位置（.app / 新 exe），仅用于展示 */
+  staged: string
+  stagedBytes: number
+  /** 将要被替换的安装位置 */
+  target: string
+}
+
+/**
+ * 下载 + 校验 + 解压更新包，返回就绪信息。**不会**改动安装目录。
+ * 进度通过 listenDownloadFileProgress / listenSelfUpdateStage 推送。
+ */
+export async function prepareSelfUpdate(
+  url: string,
+  sha256: string | null,
+  version: string,
+): Promise<PreparedUpdate> {
+  return await invoke('self_update_prepare', { url, sha256, version })
+}
+
+/** 派发更新进程并退出应用：应用会关闭，随后由独立进程完成替换并重新启动 */
+export async function applySelfUpdate(version: string): Promise<void> {
+  await invoke('self_update_apply', { version })
+}
+
+/** 丢弃已下载的更新包 */
+export async function discardSelfUpdate(): Promise<void> {
+  await invoke('self_update_discard')
+}
+
+/** 监听「校验 / 解压」阶段（下载进度另有 download-file-progress 事件） */
+export async function listenSelfUpdateStage(
+  callback: (payload: { stage: string; message?: string }) => void,
+): Promise<() => void> {
+  return await listen('self-update-stage', (event) => {
+    callback(event.payload as { stage: string; message?: string })
+  })
 }
 
 /** 标记更新日志已读（写入配置中的 last_seen_version） */
