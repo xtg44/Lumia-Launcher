@@ -165,20 +165,11 @@ npm run tauri build -- --target universal-apple-darwin # 通用包
 
 ## 许可证
 
-本项目采用 **MIT License** 发布，完整条款见 [LICENSE](LICENSE)。
+本项目采用 **Apache License 2.0** 发布，完整条款见 [LICENSE](LICENSE)。
 
 Copyright (c) 2026 Lumia
 
-你可以自由使用、修改、分发本项目，包括商业用途，只需保留版权声明与许可声明。
-
-### 第三方组件
-
-**Terracotta（联机功能）** — [burningtnt/Terracotta](https://github.com/burningtnt/Terracotta)，**AGPL-3.0**。
-本项目**不包含**其任何代码或二进制：首次使用联机功能时，客户端会从上游官方发布页下载**未经修改的二进制**，并通过本机 HTTP API 与之交互。依照 Terracotta 的 [AGPL 例外条款](https://github.com/burningtnt/Terracotta#license)，以上两种用法均不会导致本项目被 AGPL 涵盖；其版权信息已在应用「联机」页面显著位置标注（`Powered by Terracotta (AGPL v3)`）。
-
-**HMCL / PCL2 / Fold Craft Launcher** — 仅作设计与交互参考，其**源代码未包含**在本仓库中。
-
-其余依赖（Tauri、Vue、serde、tokio、reqwest 等）均为 MIT / Apache-2.0 等宽松许可，与本项目兼容。
+你可以自由使用、修改、分发本项目，包括商业用途，但必须保留版权声明、许可声明及专利授权声明。
 
 ---
 
