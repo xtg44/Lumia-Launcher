@@ -11,7 +11,7 @@
 [![Tauri](https://img.shields.io/badge/Tauri-2-24C8DB?style=flat-square&logo=tauri&logoColor=white)](https://tauri.app/)
 [![Vue](https://img.shields.io/badge/Vue-3-42b883?style=flat-square&logo=vuedotjs&logoColor=white)](https://vuejs.org/)
 [![Rust](https://img.shields.io/badge/Rust-stable-000000?style=flat-square&logo=rust&logoColor=white)](https://www.rust-lang.org/)
-[![License](https://img.shields.io/badge/license-Apache--2.0-blue?style=flat-square)](LICENSE)
+[![License](https://img.shields.io/badge/license-MIT-3DA639?style=flat-square)](LICENSE)
 
 [官网](https://lumialauncher.cn) · [下载](https://lumialauncher.cn) · [插件语言文档](docs/lumi-reference.md) · [插件系统设计](docs/插件系统设计.md)
 
@@ -164,12 +164,9 @@ npm run tauri build -- --target universal-apple-darwin # 通用包
 前端开发规范与后端命令接口说明见 [docs/前端开发指南.md](docs/前端开发指南.md)。
 
 ## 许可证
-
-本项目采用 **Apache License 2.0** 发布，完整条款见 [LICENSE](LICENSE)。
-
+本项目采用 **MIT License** 发布，完整条款见 [LICENSE](LICENSE)。
 Copyright (c) 2026 Lumia
-
-你可以自由使用、修改、分发本项目，包括商业用途，但必须保留版权声明、许可声明及专利授权声明。
+你可以自由使用、修改、分发本项目，包括商业用途，只需保留版权声明与许可声明。
 
 ---
 
