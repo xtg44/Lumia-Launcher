@@ -14,42 +14,57 @@ interface ChangelogEntry {
   items: string[]
 }
 
-// ⚠️ beta 3 的条目是占位文案（原文照录），非最终内容，发布前需替换并翻译。
-//    数组第 1 项必须是 en：locale 完全匹配不上时会兜底到 changelogs[1]。
+// 每条目按语言索引；数组第 1 项必须是 en：locale 完全匹配不上时会兜底到 changelogs[1]。
+// 发布新版本时记得同步更新 title 与条目内容（与 Release 说明保持一致即可）。
 const changelogs: ChangelogEntry[] = [
   {
     lang: 'zh-CN',
-    title: 'Lumia v1.0 beta 3',
+    title: 'Lumia v1.0 beta 4',
     items: [
-      '本次更新了一些棍母。',
+      '新增 Linux 版安装包（.deb）：Debian / Ubuntu 可直接安装',
+      '修复启动游戏闪退：Java 版本不满足要求时会自动切换到合适的 Java',
+      '修复「打开日志文件」无效的问题',
+      '修复游戏设置被重置的问题：options.txt 不再每次启动都被覆盖',
     ],
   },
   {
     lang: 'en',
-    title: 'Lumia v1.0 beta 3',
+    title: 'Lumia v1.0 beta 4',
     items: [
-      '本次更新了一些棍母。',
+      'New Linux package (.deb) for Debian / Ubuntu',
+      'Fixed crashing on launch: automatically switches to a suitable Java when the configured version is too old',
+      'Fixed the "Open Log File" action not working',
+      'Fixed game settings being reset: options.txt is no longer overwritten on every launch',
     ],
   },
   {
     lang: 'ja',
-    title: 'Lumia v1.0 beta 3',
+    title: 'Lumia v1.0 beta 4',
     items: [
-      '本次更新了一些棍母。',
+      'Linux 版パッケージ（.deb）を追加：Debian / Ubuntu にそのままインストールできます',
+      '起動時にクラッシュする問題を修正：Java バージョンが要件を満たさない場合は自動的に適切な Java に切り替えます',
+      '「ログファイルを開く」が機能しない問題を修正',
+      'ゲーム設定がリセットされる問題を修正：options.txt が毎回上書きされなくなります',
     ],
   },
   {
     lang: 'fr',
-    title: 'Lumia v1.0 beta 3',
+    title: 'Lumia v1.0 beta 4',
     items: [
-      '本次更新了一些棍母。',
+      'Nouveau paquet Linux (.deb) pour Debian / Ubuntu',
+      'Correctif : plantage au lancement du jeu — bascule automatique vers un Java adapté si nécessaire',
+      'Correctif : le bouton « Ouvrir le fichier journal » ne fonctionnait pas',
+      "Correctif : les paramètres du jeu étaient réinitialisés — options.txt n'est plus écrasé à chaque lancement",
     ],
   },
   {
     lang: 'ko',
-    title: 'Lumia v1.0 beta 3',
+    title: 'Lumia v1.0 beta 4',
     items: [
-      '本次更新了一些棍母。',
+      'Linux 패키지(.deb) 추가: Debian / Ubuntu에서 바로 설치 가능',
+      '게임 실행 시 강제 종료되는 문제 수정: Java 버전이 요구 사항에 미치지 못하면 알맞은 Java로 자동 전환합니다',
+      '"로그 파일 열기"가 작동하지 않는 문제 수정',
+      '게임 설정이 초기화되는 문제 수정: 이제 options.txt는 매번 덮어쓰이지 않습니다',
     ],
   },
 ]

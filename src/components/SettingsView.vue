@@ -446,11 +446,11 @@ async function loadVersion() {
   try {
     appVersion.value = formatAppVersion(await getAppVersion())
   } catch {
-    appVersion.value = 'v1.0 beta 3'
+    appVersion.value = 'v1.0 beta 4'
   }
 }
 
-/** 语义化版本号 (1.0.0-beta.3) → 展示文本 (v1.0 beta 3) */
+/** 语义化版本号 (1.0.0-beta.4) → 展示文本 (v1.0 beta 4) */
 function formatAppVersion(v: string): string {
   const m = v.match(/^(\d+)\.(\d+)\.(\d+)(?:-([a-zA-Z]+)\.?(\d+))?$/)
   if (!m) return v
