@@ -600,6 +600,8 @@ export interface UpdateCheckInfo {
   /** 按平台返回的下载地址（API 新增） */
   winDownload: string | null
   macDownload: string | null
+  /** Linux .deb 直链（官网接口新增字段，未提供时为 null） */
+  linuxDownload: string | null
   /** 后端已按当前运行平台解析好的下载地址，优先使用 */
   downloadUrl: string | null
   /** 自更新包；null 时前端走「打开浏览器下载」 */

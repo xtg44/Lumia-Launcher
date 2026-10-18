@@ -8303,9 +8303,9 @@ async fn mark_changelog_seen(app_handle: tauri::AppHandle, version: String) -> R
 // ========== 7.3 自动检查更新（官方 API https://lumialauncher.cn/api.php?action=version） ==========
 
 /// 与官方 API 同格式的当前版本标识（API 返回如 "v1.0 beta 1"）。
-/// Cargo 版本 "1.0.0-beta.3" 与 "v1.0 beta 3" 是同一个版本，统一用它做比较基准。
+/// Cargo 版本 "1.0.0-beta.4" 与 "v1.0 beta 4" 是同一个版本，统一用它做比较基准。
 /// 注意：比较函数只抽取数字序列，所以这里的空格/写法不影响更新判定。
-const CURRENT_VERSION_LABEL: &str = "v1.0 beta 3";
+const CURRENT_VERSION_LABEL: &str = "v1.0 beta 4";
 
 /// 提取版本字符串中的数字序列："v1.0 beta 1" → [1,0,1]；"1.1.0" → [1,1,0]
 fn version_num_vec(s: &str) -> Vec<i32> {
@@ -8342,6 +8342,8 @@ struct UpdateCheckResult {
     /// API 新增：按平台返回的下载地址
     win_download: Option<String>,
     mac_download: Option<String>,
+    /// API 新增：Linux .deb 直链（官网接口填了才有值）
+    linux_download: Option<String>,
     /// 已按当前运行平台解析好的最终下载地址（前端直接用它）
     download_url: Option<String>,
     /// 自更新包（服务端还没提供新字段时为 null → 前端退回「打开浏览器下载」）
@@ -8386,6 +8388,7 @@ async fn check_for_updates() -> Result<UpdateCheckResult, String> {
     let non_empty = |s: &Option<String>| s.clone().filter(|v| !v.is_empty());
     let win_download = non_empty(&v["win_download"].as_str().map(|s| s.to_string()));
     let mac_download = non_empty(&v["mac_download"].as_str().map(|s| s.to_string()));
+    let linux_download = non_empty(&v["linux_download"].as_str().map(|s| s.to_string()));
 
     // 解析本次实际使用的下载地址：
     // 1) 当前平台的专属字段优先（避免 macOS 用户被导到 Windows 包）
@@ -8396,7 +8399,8 @@ async fn check_for_updates() -> Result<UpdateCheckResult, String> {
     } else if cfg!(target_os = "windows") {
         win_download.clone()
     } else {
-        None
+        // Linux：官网提供 linux_download（.deb 直链）时优先使用，否则走渠道兜底
+        linux_download.clone()
     };
     let channel_download = if channel == "stable" {
         stable_download.clone()
@@ -8427,6 +8431,7 @@ async fn check_for_updates() -> Result<UpdateCheckResult, String> {
         stable_download,
         win_download,
         mac_download,
+        linux_download,
         download_url,
         update_package,
         capability: updater::detect_capability(),
