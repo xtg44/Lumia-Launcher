@@ -13,7 +13,11 @@ custom-protocol = ["tauri/custom-protocol"]
 [dependencies]
 # protocol-asset：本地文件（背景图/动图/视频、插件图标）需要它才能通过 asset:// 被 webview 读取，
 # 同时带来 http-range，<video> 的分段拉取/拖动进度依赖它。
-tauri = { version = "2", features = ["custom-protocol", "macos-private-api", "protocol-asset"] }
+# 注意：不要在依赖里直接写 "custom-protocol" —— 显式开启会让 tauri 的构建脚本把 dev 判定为 false，
+# 于是 `tauri dev` 也要求 frontendDist（dist/）存在并整体嵌入资源，缺目录时 generate_context! 直接 panic。
+# 生产构建由 tauri CLI 自动追加 `tauri/custom-protocol`（见 tauri-cli 的 build_options），
+# 应用自身保留 [features] custom-protocol 供不经 CLI 的发布构建使用。
+tauri = { version = "2", features = ["macos-private-api", "protocol-asset"] }
 tauri-plugin-dialog = "2"
 tauri-plugin-opener = "2"
 serde = { version = "1", features = ["derive"] }

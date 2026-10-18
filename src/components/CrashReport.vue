@@ -2,6 +2,7 @@
 import { ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { openCrashLogFile, parseCrashReport, type CrashInfo } from '../utils/tauri'
+import { toast } from '../utils/toast'
 
 const { t } = useI18n()
 
@@ -21,6 +22,7 @@ async function handleOpenLogFile() {
     await openCrashLogFile()
   } catch (err) {
     console.error('打开日志文件失败:', err)
+    toast(String(err), 'error')
   }
 }
 

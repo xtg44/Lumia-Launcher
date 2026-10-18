@@ -510,6 +510,158 @@ fn get_java_path_from_env() -> String {
     detect_java_executable().unwrap_or_else(|| "java".to_string())
 }
 
+/// 解析 Java 版本字符串的主版本号（"1.8.0_401" → 8，"25.0.4" → 25）
+fn parse_java_major(version: &str) -> Option<u32> {
+    let mut parts = version.trim().split(['.', '_', '-', '+']);
+    let first: u32 = parts.next()?.parse().ok()?;
+    if first == 1 {
+        parts.next()?.parse().ok()
+    } else {
+        Some(first)
+    }
+}
+
+/// 探测某个 java 可执行文件的主版本号：
+/// 优先读取 JDK 目录下的 release 文件（无进程启动开销），失败则执行 java -version 解析。
+fn java_major_version(java_exec: &str) -> Option<u32> {
+    if let Some(home) = Path::new(java_exec).parent().and_then(|p| p.parent()) {
+        if let Ok(text) = fs::read_to_string(home.join("release")) {
+            for line in text.lines() {
+                if let Some(rest) = line.strip_prefix("JAVA_VERSION=") {
+                    if let Some(major) = parse_java_major(rest.trim().trim_matches('"')) {
+                        return Some(major);
+                    }
+                }
+            }
+        }
+    }
+
+    let mut cmd = Command::new(java_exec);
+    cmd.arg("-version");
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW，避免闪出控制台窗口
+    }
+    let out = cmd.output().ok()?;
+    let text = format!(
+        "{}\n{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let idx = text.find("version \"")? + "version \"".len();
+    let rest = &text[idx..];
+    let end = rest.find('"')?;
+    parse_java_major(&rest[..end])
+}
+
+/// 收集本机所有 Java 可执行文件（去重，版本高的排前面）
+fn collect_java_paths() -> Vec<String> {
+    let mut paths: Vec<String> = Vec::new();
+
+    for root in candidate_java_roots() {
+        let is_drive_root = cfg!(windows) && root.as_os_str().to_string_lossy().ends_with('\\');
+        let max_depth = if is_drive_root { 2 } else { 4 };
+        let mut found: Vec<String> = Vec::new();
+        find_java_recursive(&root, &mut found, 0, max_depth);
+        for p in found {
+            if !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
+    }
+
+    for var in ["JAVA_HOME", "JDK_HOME"] {
+        if let Ok(home) = std::env::var(var) {
+            for part in home.split(';') {
+                let java_exe = PathBuf::from(part.trim().trim_matches('"'))
+                    .join("bin")
+                    .join(java_exe_name());
+                if java_exe.exists() {
+                    let p = java_exe.to_str().unwrap().to_string();
+                    if !paths.contains(&p) {
+                        paths.push(p);
+                    }
+                }
+            }
+        }
+    }
+
+    // 版本高的优先
+    paths.sort_by(|a, b| version_from_path(b).cmp(&version_from_path(a)));
+    paths
+}
+
+/// 选择启动游戏用的 Java：优先用户配置的路径；当它的主版本低于游戏要求时，
+/// 自动切换到本机满足要求的 Java（取满足要求中版本最低的，兼容性最好）。
+/// 返回 (java 路径, 自动切换时的提示信息)；配置的 Java 确定过旧且无可用替代时报错。
+fn choose_java_exec(
+    configured: Option<&str>,
+    required: Option<u32>,
+    allow_switch: bool,
+) -> Result<(String, Option<String>), String> {
+    let detected = || detect_java_executable().unwrap_or_else(|| "java".to_string());
+    let current = match configured {
+        Some(p) if Path::new(p).exists() => p.to_string(),
+        Some(_) => detected(), // 配置的路径不存在（被卸载/移动）→ 回退到自动探测
+        None => detected(),
+    };
+
+    let (Some(required), true) = (required, allow_switch) else {
+        return Ok((current, None));
+    };
+
+    let cur_major = java_major_version(&current);
+    if let Some(m) = cur_major {
+        if m >= required {
+            return Ok((current, None));
+        }
+    }
+
+    // 扫描本机 Java：找满足要求中版本最低的；同时记录版本最高的用于报错提示
+    let mut suitable: Option<(u32, String)> = None;
+    let mut max_seen = cur_major.map(|m| (m, current.clone()));
+    for cand in collect_java_paths() {
+        if cand == current {
+            continue;
+        }
+        let Some(m) = java_major_version(&cand) else {
+            continue;
+        };
+        if max_seen.as_ref().map(|(bm, _)| m > *bm).unwrap_or(true) {
+            max_seen = Some((m, cand.clone()));
+        }
+        if m >= required && suitable.as_ref().map(|(bm, _)| m < *bm).unwrap_or(true) {
+            suitable = Some((m, cand));
+        }
+    }
+
+    if let Some((major, path)) = suitable {
+        let note = format!(
+            "配置的 Java 版本过低，已自动切换到 Java {} 启动",
+            major
+        );
+        eprintln!(
+            "[Java] {}（原选择：{} {}）",
+            note,
+            current,
+            cur_major.map(|m| format!("Java {}", m)).unwrap_or_else(|| "未知版本".to_string())
+        );
+        return Ok((path, Some(note)));
+    }
+    if let Some((major, _)) = max_seen {
+        return Err(format!(
+            "启动该版本需要 Java {} 或更高版本，但当前只能找到 Java {}（{}）。\n请在「设置」中选择合适的 Java，或安装 JDK {} 后重试。",
+            required,
+            major,
+            current,
+            required
+        ));
+    }
+    // 探测不到任何 Java 版本信息（特殊 JRE）：保持原选择，交给启动流程处理
+    Ok((current, None))
+}
+
 /// 自动探测已安装的 Java（PCL2 思路：候选目录深度搜索 + 环境变量 + 注册表）。
 /// 参考 PCL2 PCLCS/Java.cs：候选文件夹（各启动器 runtime / .jdks / ProgramFiles 厂商目录）
 /// 递归查找 bin/java.exe，加上 JAVA_HOME/JDK_HOME，注册表作为补充（可能装在任意盘）。
@@ -7020,6 +7172,8 @@ async fn launch_game(
     }
 
     // ===== 生成最小配置，强制 tutorialStep:none 跳过向导 =====
+    // 注意：options.txt 是玩家的游戏设置（按键、画质、音量等）。
+    // 只在文件不存在时写入，否则每次启动都会把玩家的设置重置为默认值。
     let options_content = format!(
         r#"tutorialStep:none
 version:{}
@@ -7030,16 +7184,20 @@ launcher_version:0.1.0
         version_id
     );
 
-    // 写入全局 options.txt（覆盖已有文件，确保 tutorialStep:none 生效）
+    // 写入全局 options.txt（仅缺失时创建）
     let global_options_path = game_dir.join("options.txt");
-    if let Err(e) = fs::write(&global_options_path, &options_content) {
-        eprintln!("写入全局 options.txt 失败: {}", e);
+    if !global_options_path.exists() {
+        if let Err(e) = fs::write(&global_options_path, &options_content) {
+            eprintln!("写入全局 options.txt 失败: {}", e);
+        }
     }
 
-    // 写入版本目录下的 options.txt
+    // 写入版本目录下的 options.txt（仅缺失时创建）
     let version_options_path = versions_dir.join("options.txt");
-    if let Err(e) = fs::write(&version_options_path, &options_content) {
-        eprintln!("写入版本 options.txt 失败: {}", e);
+    if !version_options_path.exists() {
+        if let Err(e) = fs::write(&version_options_path, &options_content) {
+            eprintln!("写入版本 options.txt 失败: {}", e);
+        }
     }
 
     // ===== 调试日志 =====
@@ -7240,10 +7398,31 @@ launcher_version:0.1.0
     };
     eprintln!("java_library_path: {}", java_library_path);
 
-    let java_exec = java_path
-        .or_else(|| config.java_path.clone())
-        .or_else(detect_java_executable)
-        .unwrap_or_else(|| "java".to_string());
+    // ===== 选择 Java：配置的 Java 版本低于游戏要求时自动切换，避免启动后立刻崩溃 =====
+    #[cfg(target_arch = "aarch64")]
+    let use_rosetta = config.use_rosetta;
+    #[cfg(not(target_arch = "aarch64"))]
+    let use_rosetta = false;
+
+    // 所需 Java 主版本：优先版本 JSON 的 javaVersion.majorVersion（含父版本），
+    // 缺失时按版本号前缀推断；都无法判断则不校验（老版本保持原行为）。
+    let mut required_java: Option<u32> = None;
+    for vj in version_chain.iter().rev() {
+        if let Some(major) = vj["javaVersion"]["majorVersion"].as_u64() {
+            required_java = Some(major as u32);
+            break;
+        }
+    }
+    if required_java.is_none() {
+        required_java = required_java_from_name(&version);
+    }
+
+    let configured_java = java_path.or_else(|| config.java_path.clone());
+    // Rosetta（macOS 转译）启动时保持用户选择的 x86_64 Java，不做自动切换
+    let (java_exec, java_note) = choose_java_exec(configured_java.as_deref(), required_java, !use_rosetta)?;
+    if let Some(note) = java_note {
+        let _ = window.emit("launch-status", json!({ "stage": note }));
+    }
     eprintln!("java_exec: {}", java_exec);
 
     let max_mem = max_memory.unwrap_or(config.max_memory);
@@ -7329,11 +7508,6 @@ launcher_version:0.1.0
         }
     }
     eprintln!("jvm_args: {:?}", jvm_args);
-
-    #[cfg(target_arch = "aarch64")]
-    let use_rosetta = config.use_rosetta;
-    #[cfg(not(target_arch = "aarch64"))]
-    let use_rosetta = false;
 
     // 确保版本目录存在且包含必要的子目录
     let _ = fs::create_dir_all(&versions_dir);
@@ -7497,7 +7671,10 @@ async fn open_crash_log_file(app_handle: tauri::AppHandle) -> Result<(), String>
         return open::that(p).map_err(|e| format!("打开游戏日志失败: {}", e));
     }
 
-    Err("未找到崩溃日志或游戏日志".to_string())
+    Err(format!(
+        "未找到崩溃日志或游戏日志（日志目录: {}）。请先成功启动一次游戏后再试。",
+        versions_root.to_str().unwrap_or_default()
+    ))
 }
 
 fn find_latest_crash_report(versions_root: &Path) -> Vec<PathBuf> {
@@ -8390,8 +8567,10 @@ async fn self_update_prepare(
         pkg.clone()
     };
 
+    // Linux 等平台暂不支持自更新：这里直接返回错误。staged 显式标注为 PathBuf，
+    // 否则该分支的 `return` 会让 staged 推导成 never 类型（!），报 E0599/E0308。
     #[cfg(not(any(target_os = "macos", target_os = "windows")))]
-    let staged = {
+    let staged: PathBuf = {
         return Err("当前平台暂不支持自动更新".into());
     };
 
@@ -8430,56 +8609,30 @@ async fn self_update_apply(app: tauri::AppHandle, version: String) -> Result<(),
 #[tauri::command]
 async fn get_java_paths() -> Result<Vec<String>, String> {
     // 与启动探测同一套逻辑：候选目录递归搜索 + 环境变量（含 D 盘等任意位置）
-    let mut paths: Vec<String> = Vec::new();
+    Ok(collect_java_paths())
+}
 
-    for root in candidate_java_roots() {
-        let is_drive_root = cfg!(windows) && root.as_os_str().to_string_lossy().ends_with('\\');
-        let max_depth = if is_drive_root { 2 } else { 4 };
-        let mut found: Vec<String> = Vec::new();
-        find_java_recursive(&root, &mut found, 0, max_depth);
-        for p in found {
-            if !paths.contains(&p) {
-                paths.push(p);
-            }
-        }
+/// 版本号前缀 → 所需 Java 主版本（仅对能明确判断的版本返回，其余返回 None）
+fn required_java_from_name(version: &str) -> Option<u32> {
+    let v = version;
+    if v.starts_with("1.16") || v.starts_with("1.15") || v.starts_with("1.14") {
+        Some(8)
+    } else if v.starts_with("1.17") {
+        Some(16)
+    } else if v.starts_with("1.18") || v.starts_with("1.19") || v.starts_with("1.20") {
+        Some(17)
+    } else if v.starts_with("1.21") || v.starts_with("1.22") {
+        Some(21)
+    } else if v.starts_with("26") {
+        Some(25)
+    } else {
+        None
     }
-
-    for var in ["JAVA_HOME", "JDK_HOME"] {
-        if let Ok(home) = std::env::var(var) {
-            for part in home.split(';') {
-                let java_exe = PathBuf::from(part.trim().trim_matches('"'))
-                    .join("bin")
-                    .join(java_exe_name());
-                if java_exe.exists() {
-                    let p = java_exe.to_str().unwrap().to_string();
-                    if !paths.contains(&p) {
-                        paths.push(p);
-                    }
-                }
-            }
-        }
-    }
-
-    // 版本高的优先
-    paths.sort_by(|a, b| version_from_path(b).cmp(&version_from_path(a)));
-    Ok(paths)
 }
 
 #[tauri::command]
 async fn get_required_java(version: String) -> Result<u32, String> {
-    let v = version.clone();
-    if v.starts_with("1.16") || v.starts_with("1.15") || v.starts_with("1.14") {
-        return Ok(8);
-    } else if v.starts_with("1.17") {
-        return Ok(16);
-    } else if v.starts_with("1.18") || v.starts_with("1.19") || v.starts_with("1.20") {
-        return Ok(17);
-    } else if v.starts_with("1.21") || v.starts_with("1.22") {
-        return Ok(21);
-    } else if v.starts_with("26") {
-        return Ok(25);
-    }
-    Ok(17)
+    Ok(required_java_from_name(&version).unwrap_or(17))
 }
 
 // ========== 10. 启动设备代码认证 ==========
@@ -9083,5 +9236,84 @@ mod tests {
         assert!(exec_read_file(&base_canon, &serde_json::json!({ "path": "nope.txt" })).is_err());
 
         let _ = fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn parse_java_major_versions() {
+        assert_eq!(parse_java_major("1.8.0_401"), Some(8));
+        assert_eq!(parse_java_major("21.0.12"), Some(21));
+        assert_eq!(parse_java_major("25"), Some(25));
+        assert_eq!(parse_java_major("25.0.4.1"), Some(25));
+        assert_eq!(parse_java_major("17.0.1+12"), Some(17));
+        assert_eq!(parse_java_major("not-a-version"), None);
+    }
+
+    #[test]
+    fn required_java_from_name_mapping() {
+        assert_eq!(required_java_from_name("1.16.5"), Some(8));
+        assert_eq!(required_java_from_name("1.17.1"), Some(16));
+        assert_eq!(required_java_from_name("1.20.4"), Some(17));
+        assert_eq!(required_java_from_name("1.21.4"), Some(21));
+        assert_eq!(required_java_from_name("26.4-snapshot-4"), Some(25));
+        // 无法明确判断的版本不强制校验
+        assert_eq!(required_java_from_name("1.12.2"), None);
+        assert_eq!(required_java_from_name("1.8.9"), None);
+    }
+
+    #[test]
+    fn java_major_version_probe() {
+        // 能探测到本机 Java 的话，版本号必须可解析且合理
+        if let Some(p) = detect_java_executable() {
+            let v = java_major_version(&p);
+            assert!(v.is_some(), "应能探测到 {} 的 Java 主版本", p);
+            assert!(v.unwrap() >= 8);
+        }
+    }
+
+    #[test]
+    fn choose_java_exec_keeps_configured_when_suitable() {
+        // 不强制要求 / 已满足要求时保持原路径
+        let (exec, note) = choose_java_exec(Some("/nonexistent/java"), None, true).unwrap();
+        assert!(!exec.is_empty());
+        assert!(note.is_none());
+
+        if let Some(p) = detect_java_executable() {
+            let v = java_major_version(&p).unwrap_or(0);
+            let (exec, note) = choose_java_exec(Some(&p), Some(v.min(8)), true).unwrap();
+            assert_eq!(exec, p);
+            assert!(note.is_none());
+        }
+    }
+
+    /// 用户实际场景：配置的是 Java 21，但 26.x 快照要求 Java 25 → 必须自动切换
+    #[test]
+    fn choose_java_exec_upgrades_too_old_java() {
+        let old = "/usr/lib/jvm/jdk-21.0.12-oracle-x64/bin/java";
+        if !Path::new(old).exists() || java_major_version(old) != Some(21) {
+            return; // 本机没有该路径（非用户机器）：跳过
+        }
+        match choose_java_exec(Some(old), Some(25), true) {
+            Ok((exec, note)) => {
+                assert_ne!(exec, old, "Java 21 不满足要求，应切换");
+                assert!(note.is_some(), "切换时应给出提示");
+                let major = java_major_version(&exec).expect("切换后的 Java 版本应可探测");
+                assert!(major >= 25, "切换后的 Java 必须满足版本要求，实际 {}", major);
+            }
+            Err(msg) => panic!("本机存在 Java 25 却报错: {}", msg),
+        }
+    }
+
+    #[test]
+    fn choose_java_exec_reports_when_nothing_suitable() {
+        // 要求一个不存在的高版本：要么报错，要么（本机装了更高版本）切换成功
+        let err = choose_java_exec(Some("/nonexistent/java"), Some(999), true);
+        match err {
+            Err(msg) => assert!(msg.contains("999")),
+            Ok((exec, _note)) => {
+                // 本机未安装任何可探测的 Java 时保持原选择（探测不出结果不报错）
+                let probe = java_major_version(&exec);
+                assert!(probe.is_none() || probe.unwrap() >= 999);
+            }
+        }
     }
 }
