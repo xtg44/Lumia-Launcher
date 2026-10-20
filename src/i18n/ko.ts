@@ -164,6 +164,8 @@ theme: '테마 설정',
     noMatch: '일치하는 버전이 없습니다',
     reDownload: '재다운로드',
     download: '다운로드',
+    regionBlocked: '관련 법규에 따라 본 앱은 중국 본토 사용자에게 Minecraft 게임 본체 다운로드를 제공하지 않습니다. 이미 설치된 버전은 계속 실행할 수 있습니다.',
+    regionBlockedTip: '중국 본토에서는 게임 본체 다운로드를 제공하지 않습니다',
   },
   downloadConfig: {
     title: '버전 설정',

@@ -164,6 +164,8 @@ theme: 'Theme Settings',
     noMatch: 'No matching versions',
     reDownload: 'Re-download',
     download: 'Download',
+    regionBlocked: 'In accordance with local laws and regulations, Minecraft game downloads are not available to users in mainland China. Versions that are already installed can still be launched.',
+    regionBlockedTip: 'Game downloads are not available in mainland China',
   },
   downloadConfig: {
     title: 'Version Config',

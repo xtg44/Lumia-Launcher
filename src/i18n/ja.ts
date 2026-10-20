@@ -164,6 +164,8 @@ theme: 'テーマ設定',
     noMatch: '一致するバージョンがありません',
     reDownload: '再ダウンロード',
     download: 'ダウンロード',
+    regionBlocked: '法令に基づき、本アプリは中国大陸のユーザーに Minecraft 本体のダウンロードを提供しません。インストール済みのバージョンは引き続き起動できます。',
+    regionBlockedTip: '中国大陸ではゲーム本体のダウンロードを提供していません',
   },
   downloadConfig: {
     title: 'バージョン設定',

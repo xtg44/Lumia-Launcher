@@ -384,6 +384,11 @@ export async function offlineModeAllowed(): Promise<boolean> {
   return await invoke('offline_mode_allowed')
 }
 
+/** 是否允许下载游戏本体（中国大陆不提供，法律法规合规） */
+export async function gameDownloadAllowed(): Promise<boolean> {
+  return await invoke('game_download_allowed')
+}
+
 // ============ AI 助手 ============
 export interface AiChatMessage {
   role: 'user' | 'assistant'

@@ -446,17 +446,18 @@ async function loadVersion() {
   try {
     appVersion.value = formatAppVersion(await getAppVersion())
   } catch {
-    appVersion.value = 'v1.0 beta 4'
+    appVersion.value = 'v1.0 RC 1'
   }
 }
 
-/** 语义化版本号 (1.0.0-beta.4) → 展示文本 (v1.0 beta 4) */
+/** 语义化版本号 (1.0.0-rc.1) → 展示文本 (v1.0 RC 1) */
 function formatAppVersion(v: string): string {
   const m = v.match(/^(\d+)\.(\d+)\.(\d+)(?:-([a-zA-Z]+)\.?(\d+))?$/)
   if (!m) return v
   const [, major, minor, , tag, tagNum] = m
   const base = `v${major}.${minor}`
-  if (tag) return `${base} ${tag} ${tagNum}`
+  // RC 用大写（与官网 latest 的写法保持一致），beta 保持小写
+  if (tag) return `${base} ${tag.toLowerCase() === 'rc' ? 'RC' : tag} ${tagNum}`
   return base
 }
 

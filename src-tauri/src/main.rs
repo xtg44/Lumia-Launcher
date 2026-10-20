@@ -1011,6 +1011,14 @@ async fn download_game(
     config: DownloadConfig,
 ) -> Result<(), String> {
     let state = app_handle.state::<AppState>();
+
+    // 合规检查：根据国家法律法规，不再向中国大陆地区用户提供游戏本体下载。
+    // 放在最前面，避免在大陆地区创建版本目录或发起任何游戏文件请求。
+    if resolve_is_mainland(&state).await {
+        dl_log("合规拦截：中国大陆地区不提供游戏本体下载");
+        return Err("根据国家法律法规，本应用不再向中国大陆地区用户提供 Minecraft 游戏本体下载。已安装的版本仍可正常启动。".to_string());
+    }
+
     state.cancel_download.store(false, Ordering::SeqCst);
     
     dl_log("download_game 命令已调用");
@@ -6763,14 +6771,12 @@ async fn ip_in_mainland_china() -> Option<bool> {
     }
 }
 
-/// 离线模式是否允许（Mojang 许可条款合规，供前端展示）：
-/// 中国大陆一直允许（无需正版）；非大陆或断网无法判断地区时，仅当曾用正版启动过一次才允许。
-#[tauri::command]
-async fn offline_mode_allowed(app_handle: tauri::AppHandle) -> bool {
-    let state = app_handle.state::<AppState>();
+/// 统一解析「是否位于中国大陆」并把结果持久化到配置（断网时回落到上次成功判定的结果）。
+/// 各合规检查（离线模式、游戏本体下载）共用，避免重复请求 Cloudflare trace。
+async fn resolve_is_mainland(state: &AppState) -> bool {
     let ip = ip_in_mainland_china().await; // 网络判定不持有配置锁
     let mut cfg = state.config.lock().await;
-    let is_mainland = match ip {
+    match ip {
         Some(is_cn) => {
             if cfg.known_mainland != Some(is_cn) {
                 cfg.known_mainland = Some(is_cn);
@@ -6782,8 +6788,24 @@ async fn offline_mode_allowed(app_handle: tauri::AppHandle) -> bool {
         }
         // 断网/不可达：回落到上次成功判定的地区；从未判定过则视为非大陆
         None => cfg.known_mainland.unwrap_or(false),
-    };
-    is_mainland || cfg.ever_launched_online
+    }
+}
+
+/// 离线模式是否允许（Mojang 许可条款合规，供前端展示）：
+/// 中国大陆一直允许（无需正版）；非大陆或断网无法判断地区时，仅当曾用正版启动过一次才允许。
+#[tauri::command]
+async fn offline_mode_allowed(app_handle: tauri::AppHandle) -> bool {
+    let state = app_handle.state::<AppState>();
+    let is_mainland = resolve_is_mainland(&state).await;
+    is_mainland || state.config.lock().await.ever_launched_online
+}
+
+/// 是否允许下载 Minecraft 游戏本体（法律法规合规，供前端展示）：
+/// 中国大陆地区一律不提供游戏本体下载；非大陆或无法判定地区时允许。
+#[tauri::command]
+async fn game_download_allowed(app_handle: tauri::AppHandle) -> bool {
+    let state = app_handle.state::<AppState>();
+    !resolve_is_mainland(&state).await
 }
 
 // ========== 检测指定 PID 的进程是否已出现可见窗口（用于启动动画「等游戏窗口出现再消失」） ==========
@@ -8302,30 +8324,82 @@ async fn mark_changelog_seen(app_handle: tauri::AppHandle, version: String) -> R
 
 // ========== 7.3 自动检查更新（官方 API https://lumialauncher.cn/api.php?action=version） ==========
 
-/// 与官方 API 同格式的当前版本标识（API 返回如 "v1.0 beta 1"）。
-/// Cargo 版本 "1.0.0-beta.4" 与 "v1.0 beta 4" 是同一个版本，统一用它做比较基准。
-/// 注意：比较函数只抽取数字序列，所以这里的空格/写法不影响更新判定。
-const CURRENT_VERSION_LABEL: &str = "v1.0 beta 4";
+/// 与官方 API 同格式的当前版本标识（API 返回如 "v1.0 RC 1"）。
+/// Cargo 版本 "1.0.0-rc.1" 与 "v1.0 RC 1" 是同一个版本，统一用它做比较基准。
+const CURRENT_VERSION_LABEL: &str = "v1.0 RC 1";
 
-/// 提取版本字符串中的数字序列："v1.0 beta 1" → [1,0,1]；"1.1.0" → [1,1,0]
-fn version_num_vec(s: &str) -> Vec<i32> {
+/// 版本阶段：alpha < beta < RC < 正式版。同一阶段再比阶段号。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum VersionStage {
+    Alpha = 0,
+    Beta = 1,
+    Rc = 2,
+    Stable = 3,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ParsedLabel {
+    base: Vec<i32>,
+    stage: VersionStage,
+    stage_num: i32,
+}
+
+/// 提取字符串中的全部数字序列："v1.0 beta 1" → [1,0,1]；"1.1.0" → [1,1,0]
+fn numbers_in(s: &str) -> Vec<i32> {
     s.split(|c: char| !c.is_ascii_digit())
         .filter(|p| !p.is_empty())
         .filter_map(|p| p.parse().ok())
         .collect()
 }
 
-/// 逐位比较（缺位补 0），返回 a > b
-fn version_greater(a: &[i32], b: &[i32]) -> bool {
+/// 解析版本标识："v1.0 beta 4" / "v1.0 RC 1" / "1.0.0-rc.1" / "1.2.0"。
+/// 阶段关键字（alpha / beta / rc）之前是基础版本号，之后第一个数字是阶段号。
+fn parse_label(s: &str) -> ParsedLabel {
+    // 只把 ASCII 字母转小写，保证长度不变，索引可直接用于原串切片
+    let lower = s.to_ascii_lowercase();
+    let tag = ["alpha", "beta", "rc"]
+        .iter()
+        .filter_map(|k| lower.find(k).map(|i| (i, *k)))
+        .min_by_key(|(i, _)| *i);
+    let (base_part, stage, stage_part) = match tag {
+        Some((idx, key)) => {
+            let stage = match key {
+                "alpha" => VersionStage::Alpha,
+                "beta" => VersionStage::Beta,
+                _ => VersionStage::Rc,
+            };
+            (&s[..idx], stage, &s[idx + key.len()..])
+        }
+        None => (s, VersionStage::Stable, ""),
+    };
+    ParsedLabel {
+        base: numbers_in(base_part),
+        stage,
+        stage_num: numbers_in(stage_part).first().copied().unwrap_or(0),
+    }
+}
+
+/// 逐位比较数字序列（缺位补 0）
+fn base_cmp(a: &[i32], b: &[i32]) -> std::cmp::Ordering {
     let len = a.len().max(b.len());
     for i in 0..len {
         let x = a.get(i).copied().unwrap_or(0);
         let y = b.get(i).copied().unwrap_or(0);
-        if x != y {
-            return x > y;
+        match x.cmp(&y) {
+            std::cmp::Ordering::Equal => continue,
+            other => return other,
         }
     }
-    false
+    std::cmp::Ordering::Equal
+}
+
+/// 完整版本比较：基础版本号 → 阶段（alpha < beta < RC < 正式版）→ 阶段号
+fn label_cmp(a: &str, b: &str) -> std::cmp::Ordering {
+    let pa = parse_label(a);
+    let pb = parse_label(b);
+    base_cmp(&pa.base, &pb.base)
+        .then(pa.stage.cmp(&pb.stage))
+        .then(pa.stage_num.cmp(&pb.stage_num))
 }
 
 #[derive(Serialize)]
@@ -8413,9 +8487,9 @@ async fn check_for_updates() -> Result<UpdateCheckResult, String> {
         .or_else(|| non_empty(&stable_download));
 
     let current = CURRENT_VERSION_LABEL.to_string();
-    let latest_nums = version_num_vec(&latest);
-    let current_nums = version_num_vec(&current);
-    let has_update = !latest.is_empty() && version_greater(&latest_nums, &current_nums);
+    // 支持 alpha / beta / RC / 正式版的先后关系（旧版只比数字，RC 会被误判为「没有新版本」）
+    let has_update =
+        !latest.is_empty() && label_cmp(&latest, &current) == std::cmp::Ordering::Greater;
 
     // 自更新包：服务端没给（老 API）就是 None，前端自动退回「打开浏览器下载」
     let update_package = updater::pick_package(v);
@@ -9047,6 +9121,7 @@ fn main() {
             is_game_running,
             terracotta_nodes_status,
             offline_mode_allowed,
+            game_download_allowed,
             ai_chat,
             ai_execute_file_ops,
             list_ai_models,
@@ -9306,6 +9381,28 @@ mod tests {
             }
             Err(msg) => panic!("本机存在 Java 25 却报错: {}", msg),
         }
+    }
+
+    #[test]
+    fn label_cmp_orders_alpha_beta_rc_stable() {
+        use std::cmp::Ordering;
+        assert_eq!(label_cmp("v1.0 beta 4", "v1.0 beta 4"), Ordering::Equal);
+        assert_eq!(label_cmp("v1.0 RC 1", "v1.0 beta 4"), Ordering::Greater);
+        assert_eq!(label_cmp("v1.0 beta 5", "v1.0 RC 1"), Ordering::Less);
+        assert_eq!(label_cmp("v1.0", "v1.0 RC 1"), Ordering::Greater);
+        assert_eq!(label_cmp("1.0.0-rc.1", "v1.0 RC 1"), Ordering::Equal);
+        assert_eq!(label_cmp("v1.0 RC 2", "v1.0 RC 1"), Ordering::Greater);
+        assert_eq!(label_cmp("v1.1", "v1.0 RC 9"), Ordering::Greater);
+        // 与旧逻辑一致：基础版本号优先
+        assert_eq!(label_cmp("v1.0 beta 9", "v1.1 beta 1"), Ordering::Less);
+    }
+
+    #[test]
+    fn label_cmp_treats_rc_as_newer_than_beta() {
+        // 新比较器的语义：同一基础版本下 RC 比 beta 新（旧客户端仍是纯数字比较，
+        // 它们收不到这次 RC 的更新提示 —— 这是已知且已确认的取舍）
+        assert!(label_cmp("v1.0 RC 1", "v1.0 beta 4") == std::cmp::Ordering::Greater);
+        assert!(label_cmp("v1.0 beta 4", "v1.0 RC 1") == std::cmp::Ordering::Less);
     }
 
     #[test]

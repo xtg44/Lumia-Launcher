@@ -164,6 +164,8 @@ theme: '主題設定',
     noMatch: '沒有找到匹配嘅版本',
     reDownload: '重新下載',
     download: '下載',
+    regionBlocked: '依相關法律法規，本應用程式不再向中國大陸地區使用者提供 Minecraft 遊戲本體下載。已安裝的版本仍可正常啟動。',
+    regionBlockedTip: '依相關法律法規，中國大陸地區不提供遊戲本體下載',
   },
   downloadConfig: {
     title: '版本設定',

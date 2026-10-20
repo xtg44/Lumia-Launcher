@@ -162,6 +162,8 @@ theme: '主题设置',
     noMatch: '没有找到匹配的版本',
     reDownload: '重新下载',
     download: '下载',
+    regionBlocked: '根据国家法律法规，本应用不再向中国大陆地区用户提供 Minecraft 游戏本体下载。已安装的版本仍可正常启动。',
+    regionBlockedTip: '根据国家法律法规，中国大陆地区不提供游戏本体下载',
   },
   downloadConfig: {
     title: '版本配置',

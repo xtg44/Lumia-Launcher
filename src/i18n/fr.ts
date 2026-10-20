@@ -164,6 +164,8 @@ theme: 'Thème',
     noMatch: 'Aucune version correspondante',
     reDownload: 'Re-télécharger',
     download: 'Télécharger',
+    regionBlocked: "Conformément à la réglementation locale, le téléchargement du jeu Minecraft n'est pas disponible pour les utilisateurs en Chine continentale. Les versions déjà installées restent jouables.",
+    regionBlockedTip: "Le téléchargement du jeu n'est pas disponible en Chine continentale",
   },
   downloadConfig: {
     title: 'Configuration de la version',
