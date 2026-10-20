@@ -57,11 +57,20 @@ jobs:
       - name: List artifacts
         run: ls -lh src-tauri/target/release/bundle/deb/
 
+      # Tauri 产出的默认名是 "Lumia.Launcher_x.y.z_amd64.deb"，与 Windows/macOS 的命名规则不一致，
+      # 统一改成 Lumia-Launcher-<version>-Linux-x64.deb（与历史 Release 保持一致）
+      - name: Normalize .deb name
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          mkdir -p dist-linux
+          cp src-tauri/target/release/bundle/deb/*.deb "dist-linux/Lumia-Launcher-${VERSION}-Linux-x64.deb"
+          ls -lh dist-linux
+
       - name: Upload .deb
         uses: actions/upload-artifact@v4
         with:
           name: lumia-linux-deb
-          path: src-tauri/target/release/bundle/deb/*.deb
+          path: dist-linux/*.deb
           if-no-files-found: error
 
       # tag 触发时自动传到对应 Release；手动触发时用 inputs.release_tag 指定
@@ -72,5 +81,5 @@ jobs:
         run: |
           TAG="${{ inputs.release_tag }}"
           if [ -z "$TAG" ]; then TAG="${GITHUB_REF_NAME}"; fi
-          gh release upload "$TAG" src-tauri/target/release/bundle/deb/*.deb --clobber
+          gh release upload "$TAG" dist-linux/*.deb --clobber
           echo "uploaded to release $TAG"
