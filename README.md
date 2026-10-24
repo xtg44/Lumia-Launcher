@@ -7,7 +7,7 @@
 **跨平台 Minecraft 启动器** · Tauri 2 + Rust + Vue 3
 
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-4c6ef5?style=flat-square)](#下载安装)
-[![Version](https://img.shields.io/badge/version-1.0.0--rc.1-e94560?style=flat-square)](#下载安装)
+[![Version](https://img.shields.io/badge/version-1.0.0-e94560?style=flat-square)](#下载安装)
 [![Tauri](https://img.shields.io/badge/Tauri-2-24C8DB?style=flat-square&logo=tauri&logoColor=white)](https://tauri.app/)
 [![Vue](https://img.shields.io/badge/Vue-3-42b883?style=flat-square&logo=vuedotjs&logoColor=white)](https://vuejs.org/)
 [![Rust](https://img.shields.io/badge/Rust-stable-000000?style=flat-square&logo=rust&logoColor=white)](https://www.rust-lang.org/)
@@ -41,7 +41,7 @@ Lumia Launcher 是一个用 **Rust + Tauri 2** 构建的轻量跨平台 Minecraf
 - macOS 支持 **Touch Bar** 操作
 
 ### 📦 资源下载
-- 版本、Mod、整合包、资源包、光影包一站式下载安装
+- 版本、Mod、整合包、资源包、光影包一站式下载安装，支持把已安装版本导出为 `.mrpack` 整合包
 - 接入 **BMCLAPI** 国内镜像，下载免代理
 - 同时支持 **Modrinth** 与 **CurseForge** 生态
 
@@ -72,10 +72,10 @@ Lumia Launcher 是一个用 **Rust + Tauri 2** 构建的轻量跨平台 Minecraf
 | macOS 10.15+ | `.dmg`（Apple Silicon / Intel） |
 | Linux x64 | `.deb`（Debian / Ubuntu，GitHub Releases 下载） |
 
-> 当前为 **v1.0.0-rc.1** 候选版，功能已基本定型，欢迎反馈问题。
+> **v1.0 正式版**已发布（2026-10-24），欢迎反馈问题。
 
-> **合规说明**：根据国家法律法规，本应用不再向中国大陆地区用户提供 Minecraft 游戏本体下载；
-> 已安装的版本仍可正常启动，模组、资源包、光影包与整合包下载不受影响。
+> **说明**：游戏本体文件由启动器在安装版本时从 Mojang 官方源（及 BMCLAPI 镜像）按需下载，
+> 安装包本身不包含、也不分发任何游戏文件。
 
 ## 技术栈
 

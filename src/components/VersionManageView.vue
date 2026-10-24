@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { save } from '@tauri-apps/plugin-dialog'
 import { toast } from '../utils/toast'
 import {
   renameVersion,
@@ -9,7 +10,10 @@ import {
   toggleMod,
   deleteMod,
   openModsFolder,
+  exportModpack,
+  listenModpackExportProgress,
   type ModFileInfo,
+  type ModpackExportProgress,
 } from '../utils/tauri'
 
 const { t } = useI18n()
@@ -60,6 +64,21 @@ async function loadMods() {
 onMounted(() => {
   newName.value = props.version
   loadMods()
+  exportName.value = props.version
+  listenModpackExportProgress((data) => {
+    exportProgress.value = data
+  }).then((unlisten) => {
+    unlistenExportProgress = unlisten
+  }).catch(() => {
+    // 非 Tauri 环境（纯浏览器预览）没有事件系统，忽略即可
+  })
+})
+
+onUnmounted(() => {
+  if (unlistenExportProgress) {
+    unlistenExportProgress()
+    unlistenExportProgress = null
+  }
 })
 
 async function handleRename() {
@@ -135,6 +154,55 @@ async function handleDeleteMod(mod: ModFileInfo) {
   }
 }
 
+// ===== 导出整合包（.mrpack） =====
+const exportName = ref('')
+const exporting = ref(false)
+const exportProgress = ref<ModpackExportProgress | null>(null)
+let unlistenExportProgress: (() => void) | null = null
+
+const exportPercent = computed(() => Math.round(exportProgress.value?.percent ?? 0))
+
+function sanitizeFileName(name: string): string {
+  const cleaned = name.trim().replace(/[\\/:*?"<>|]/g, '_').replace(/\s+/g, ' ').trim()
+  return cleaned || props.version
+}
+
+async function handleExport() {
+  if (exporting.value) return
+  const packName = exportName.value.trim()
+  if (!packName) {
+    toast(t('versionManage.exportNoName'), 'error')
+    return
+  }
+  let path: string | null = null
+  try {
+    path = await save({
+      defaultPath: `${sanitizeFileName(packName)}.mrpack`,
+      filters: [{ name: 'Modrinth Modpack', extensions: ['mrpack'] }],
+    })
+  } catch (err) {
+    toast(t('versionManage.exportFailed', { msg: err instanceof Error ? err.message : String(err) }), 'error')
+    return
+  }
+  if (!path) return
+
+  exporting.value = true
+  exportProgress.value = { stage: 'collect', current: 0, total: 0, percent: 0 }
+  try {
+    const result = await exportModpack({
+      version: props.version,
+      name: packName,
+      outputPath: path,
+    })
+    toast(t('versionManage.exportSuccess', { path: result.path, count: result.fileCount }), 'success')
+  } catch (err) {
+    toast(t('versionManage.exportFailed', { msg: err instanceof Error ? err.message : String(err) }), 'error')
+  } finally {
+    exporting.value = false
+    exportProgress.value = null
+  }
+}
+
 function formatSize(bytes: number): string {
   if (bytes >= 1048576) return (bytes / 1048576).toFixed(1) + ' MB'
   if (bytes >= 1024) return (bytes / 1024).toFixed(0) + ' KB'
@@ -206,6 +274,35 @@ function formatSize(bytes: number): string {
             <button class="mini-btn danger" :disabled="busyMod !== ''" @click="handleDeleteMod(mod)">
               {{ confirmDeleteMod === mod.fileName ? $t('versionManage.confirmDeleteAgain') : $t('common.delete') }}
             </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- 导出整合包 -->
+      <div class="manage-item">
+        <label class="manage-label">{{ $t('versionManage.exportLabel') }}</label>
+        <span class="manage-hint">{{ $t('versionManage.exportHint') }}</span>
+        <div class="manage-row">
+          <input
+            type="text"
+            v-model="exportName"
+            class="manage-input"
+            :placeholder="$t('versionManage.exportNamePlaceholder')"
+            :disabled="exporting"
+          />
+          <button class="action-btn primary" :disabled="exporting" @click="handleExport">
+            {{ exporting ? $t('versionManage.exporting') : $t('versionManage.exportBtn') }}
+          </button>
+        </div>
+        <div v-if="exportProgress" class="export-progress">
+          <div class="export-progress-row">
+            <span>{{ exportProgress.stage === 'collect' ? $t('versionManage.exportStageCollect') : $t('versionManage.exportStagePack') }}</span>
+            <span v-if="exportProgress.total > 0">
+              {{ $t('versionManage.exportProgress', { current: exportProgress.current, total: exportProgress.total, percent: exportPercent }) }}
+            </span>
+          </div>
+          <div class="export-progress-track">
+            <div class="export-progress-bar" :style="{ width: exportPercent + '%' }"></div>
           </div>
         </div>
       </div>
@@ -332,6 +429,37 @@ function formatSize(bytes: number): string {
   outline: none;
 }
 .manage-input:focus { border-color: var(--accent-color); }
+.manage-hint {
+  font-family: Inter, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', SimHei, Arial, Helvetica, sans-serif;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--label-color);
+}
+.export-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 2px;
+}
+.export-progress-row {
+  display: flex;
+  justify-content: space-between;
+  font-family: Inter, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', SimHei, Arial, Helvetica, sans-serif;
+  font-size: 11px;
+  color: var(--label-color);
+}
+.export-progress-track {
+  height: 5px;
+  border-radius: 999px;
+  background: var(--button-bg);
+  overflow: hidden;
+}
+.export-progress-bar {
+  height: 100%;
+  border-radius: 999px;
+  background: var(--accent-color);
+  transition: width 150ms ease;
+}
 
 .action-btn {
   padding: 9px 18px;

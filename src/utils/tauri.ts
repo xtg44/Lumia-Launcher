@@ -331,6 +331,38 @@ export async function installModpack(path: string, customVersionName: string): P
   return await invoke('install_modpack', { path, customVersionName })
 }
 
+export interface ModpackExportResult {
+  path: string
+  fileCount: number
+  size: number
+  minecraft: string
+  loader: string
+  loaderVersion: string
+}
+
+export interface ModpackExportProgress {
+  stage: 'collect' | 'pack' | 'done'
+  current: number
+  total: number
+  percent: number
+}
+
+export async function exportModpack(params: {
+  version: string
+  name: string
+  outputPath: string
+}): Promise<ModpackExportResult> {
+  return await invoke('export_modpack', params)
+}
+
+export async function listenModpackExportProgress(
+  callback: (data: ModpackExportProgress) => void,
+): Promise<() => void> {
+  return await listen('modpack-export-progress', (event) => {
+    callback(event.payload as ModpackExportProgress)
+  })
+}
+
 // ============ 陶瓦联机（Terracotta） ============
 export async function terracottaStart(): Promise<number> {
   return await invoke('terracotta_start')
@@ -382,11 +414,6 @@ export async function terracottaBack(port: number): Promise<any> {
 /** 离线模式是否允许（仅中国大陆 IP 允许，Mojang 许可条款合规） */
 export async function offlineModeAllowed(): Promise<boolean> {
   return await invoke('offline_mode_allowed')
-}
-
-/** 是否允许下载游戏本体（中国大陆不提供，法律法规合规） */
-export async function gameDownloadAllowed(): Promise<boolean> {
-  return await invoke('game_download_allowed')
 }
 
 // ============ AI 助手 ============

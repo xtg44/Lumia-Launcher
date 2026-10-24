@@ -446,7 +446,7 @@ async function loadVersion() {
   try {
     appVersion.value = formatAppVersion(await getAppVersion())
   } catch {
-    appVersion.value = 'v1.0 RC 1'
+    appVersion.value = 'v1.0'
   }
 }
 
@@ -467,6 +467,8 @@ function onBgBlurChange(e: Event) {
   localStorage.setItem('lumia-bg-blur', String(val))
   emit('blur-change', val)
 }
+
+// 彩蛋：按住 Shift 连点版本号 10 次
 const DEV_CLICKS_NEEDED = 10
 
 function handleVersionClick(e: MouseEvent) {

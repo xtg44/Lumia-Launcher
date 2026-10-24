@@ -4,6 +4,26 @@
   padding: 0;
 }
 
+/* 全局隐藏滚动条（滚轮 / 触控板仍可正常滚动）。
+   组件里旧的 ::-webkit-scrollbar 样式用 !important 统一覆盖，避免任何页面出现滚动条。 */
+* {
+  scrollbar-width: none !important;
+  -ms-overflow-style: none !important;
+}
+
+*::-webkit-scrollbar {
+  width: 0 !important;
+  height: 0 !important;
+  display: none !important;
+}
+
+*::-webkit-scrollbar-track,
+*::-webkit-scrollbar-thumb,
+*::-webkit-scrollbar-corner,
+*::-webkit-scrollbar-button {
+  display: none !important;
+}
+
 html, body {
   width: 100%;
   height: 100%;

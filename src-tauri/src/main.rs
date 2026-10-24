@@ -1012,13 +1012,6 @@ async fn download_game(
 ) -> Result<(), String> {
     let state = app_handle.state::<AppState>();
 
-    // 合规检查：根据国家法律法规，不再向中国大陆地区用户提供游戏本体下载。
-    // 放在最前面，避免在大陆地区创建版本目录或发起任何游戏文件请求。
-    if resolve_is_mainland(&state).await {
-        dl_log("合规拦截：中国大陆地区不提供游戏本体下载");
-        return Err("根据国家法律法规，本应用不再向中国大陆地区用户提供 Minecraft 游戏本体下载。已安装的版本仍可正常启动。".to_string());
-    }
-
     state.cancel_download.store(false, Ordering::SeqCst);
     
     dl_log("download_game 命令已调用");
@@ -2158,7 +2151,7 @@ async fn install_fabric_loader(
         }
     }
     
-    let lib_list: Vec<serde_json::Value> = if let Some(libs_obj) = launcher_meta["libraries"].as_object() {
+    let mut lib_list: Vec<serde_json::Value> = if let Some(libs_obj) = launcher_meta["libraries"].as_object() {
         let mut all_libs = Vec::new();
         if let Some(client_libs) = libs_obj.get("client").and_then(|v| v.as_array()) {
             all_libs.extend(client_libs.iter().cloned());
@@ -2172,6 +2165,20 @@ async fn install_fabric_loader(
     } else {
         Vec::new()
     };
+
+    // intermediary 映射表不在 launcherMeta.libraries 里，而在 meta_json.intermediary。
+    // 缺少它时 Fabric Loader 不会把游戏类映射成 intermediary 名称，所有引用
+    // net.minecraft.class_xxx 的模组（包括 Fabric API）都会 ClassNotFoundException。
+    if let Some(intermediary_maven) = meta_json["intermediary"]["maven"].as_str() {
+        if !intermediary_maven.is_empty()
+            && !lib_list.iter().any(|l| l["name"].as_str() == Some(intermediary_maven))
+        {
+            lib_list.push(serde_json::json!({
+                "name": intermediary_maven,
+                "url": "https://maven.fabricmc.net/"
+            }));
+        }
+    }
     
     if !lib_list.is_empty() {
         let total_libs = lib_list.len();
@@ -2922,11 +2929,12 @@ fn modify_version_json_for_fabric(versions_dir: &Path, version: &str, _loader_ve
         eprintln!("警告: 未找到 mainClass");
     }
     
-    // ========== 把 fabric-loader 本体加入 libraries ==========
-    // fabric-loader 本体不在 launcherMeta.libraries 里，必须单独加入，否则启动时找不到 KnotClient
-    if !loader_maven.is_empty() {
-        if let Some(libraries) = json["libraries"].as_array_mut() {
-            // 检查是否已存在
+    // ========== 把 fabric-loader / intermediary 加入 libraries ==========
+    // 这两个构件都不在 launcherMeta.libraries 里，必须单独加入：
+    // - fabric-loader：否则启动时找不到 KnotClient
+    // - intermediary：否则模组引用的 net.minecraft.class_xxx 无法解析
+    if let Some(libraries) = json["libraries"].as_array_mut() {
+        if !loader_maven.is_empty() {
             let exists = libraries.iter().any(|l| {
                 l["name"].as_str().map(|n| n == loader_maven).unwrap_or(false)
             });
@@ -2938,6 +2946,21 @@ fn modify_version_json_for_fabric(versions_dir: &Path, version: &str, _loader_ve
                 });
                 libraries.push(loader_lib);
                 eprintln!("已将 fabric-loader 加入 libraries: {}", loader_maven);
+            }
+        }
+
+        if let Some(intermediary_maven) = meta_json["intermediary"]["maven"].as_str() {
+            if !intermediary_maven.is_empty() {
+                let exists = libraries.iter().any(|l| {
+                    l["name"].as_str().map(|n| n == intermediary_maven).unwrap_or(false)
+                });
+                if !exists {
+                    libraries.push(serde_json::json!({
+                        "name": intermediary_maven,
+                        "url": "https://maven.fabricmc.net/"
+                    }));
+                    eprintln!("已将 fabric-intermediary 加入 libraries: {}", intermediary_maven);
+                }
             }
         }
     }
@@ -4660,6 +4683,20 @@ fn read_pack_file(archive: &mut zip::ZipArchive<fs::File>, name: &str) -> Option
         })
 }
 
+fn count_override_mods(archive: &mut zip::ZipArchive<fs::File>, dir: &str) -> usize {
+    let prefix = format!("{}/mods/", dir.trim_end_matches('/'));
+    let mut count = 0;
+    for i in 0..archive.len() {
+        if let Ok(f) = archive.by_index(i) {
+            let name = f.name();
+            if !f.is_dir() && name.starts_with(&prefix) {
+                count += 1;
+            }
+        }
+    }
+    count
+}
+
 fn parse_modpack_index(path: &str) -> Result<ModpackInfo, String> {
     let mut archive = open_pack_archive(path)?;
 
@@ -4685,7 +4722,9 @@ fn parse_modpack_index(path: &str) -> Result<ModpackInfo, String> {
                 break;
             }
         }
-        let file_count = j["files"].as_array().map(|a| a.len()).unwrap_or(0);
+        // 本启动器导出的包把文件放在 overrides/ 下，也要计入模组数量
+        let file_count = j["files"].as_array().map(|a| a.len()).unwrap_or(0)
+            + count_override_mods(&mut archive, "overrides");
         return Ok(ModpackInfo {
             format: "modrinth".to_string(),
             name,
@@ -4719,7 +4758,9 @@ fn parse_modpack_index(path: &str) -> Result<ModpackInfo, String> {
                 }
             }
         }
-        let file_count = j["files"].as_array().map(|a| a.len()).unwrap_or(0);
+        let override_dir = j["overrides"].as_str().unwrap_or("overrides");
+        let file_count = j["files"].as_array().map(|a| a.len()).unwrap_or(0)
+            + count_override_mods(&mut archive, override_dir);
         return Ok(ModpackInfo {
             format: "curseforge".to_string(),
             name,
@@ -5057,7 +5098,457 @@ async fn install_modpack(
     Ok(final_name)
 }
 
-// ========== 3.14 陶瓦联机（Terracotta） ==========
+// ========== 3.14 整合包导出（Modrinth .mrpack） ==========
+// 导出思路：Modrinth 格式的 files 需要下载直链，而本启动器不保存模组来源信息，
+// 因此把整个实例内容放进 overrides/（配置、模组、资源包等），files 留空。
+// 这样导出的包在任何支持 .mrpack 的启动器里都能完整还原。
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ModpackExportResult {
+    path: String,
+    file_count: usize,
+    size: u64,
+    minecraft: String,
+    loader: String,
+    loader_version: String,
+}
+
+struct ExportEntry {
+    abs: PathBuf,
+    /// 相对于版本目录的路径，统一使用 /（zip 内路径）
+    rel: String,
+    size: u64,
+}
+
+/// 不参与导出的目录（任意层级）：用户存档、日志、缓存、启动器临时文件
+const EXPORT_EXCLUDED_DIRS: &[&str] = &[
+    "saves",
+    "logs",
+    "crash-reports",
+    "screenshots",
+    "natives",
+    "downloads",
+    "backups",
+    ".mixin.out",
+    ".cache",
+    ".fabric",
+    ".git",
+    ".idea",
+    "__pycache__",
+];
+
+const EXPORT_EXCLUDED_FILES: &[&str] = &[".DS_Store", "Thumbs.db", "usercache.json"];
+
+fn is_excluded_export_entry(name: &str, is_top_level: bool, version_name: &str) -> bool {
+    if EXPORT_EXCLUDED_DIRS.contains(&name) || EXPORT_EXCLUDED_FILES.contains(&name) {
+        return true;
+    }
+    if name.ends_with(".log") {
+        return true;
+    }
+    if is_top_level
+        && (name == format!("{}.json", version_name) || name == format!("{}.jar", version_name))
+    {
+        return true;
+    }
+    false
+}
+
+/// 从版本 JSON 的 libraries 中识别加载器类型与版本
+fn detect_loader_from_libraries(json: &serde_json::Value, mc_version: &str) -> (String, String) {
+    let mut loader = String::new();
+    let mut loader_version = String::new();
+    if let Some(libs) = json["libraries"].as_array() {
+        for lib in libs {
+            let Some(name) = lib["name"].as_str() else { continue };
+            let parts: Vec<&str> = name.split(':').collect();
+            if parts.len() < 3 {
+                continue;
+            }
+            let (group, artifact, ver) = (parts[0], parts[1], parts[2]);
+            let hit = match (group, artifact) {
+                ("net.fabricmc", "fabric-loader") => Some(("fabric", ver.to_string())),
+                ("org.quiltmc", "quilt-loader") => Some(("quilt", ver.to_string())),
+                ("net.minecraftforge", "forge") => {
+                    Some(("forge", strip_mc_prefix(ver, mc_version)))
+                }
+                ("net.neoforged", "neoforge") | ("net.neoforged", "forge") => {
+                    Some(("neoforge", strip_mc_prefix(ver, mc_version)))
+                }
+                _ => None,
+            };
+            if let Some((l, v)) = hit {
+                loader = l.to_string();
+                loader_version = v;
+                break;
+            }
+        }
+    }
+    (loader, loader_version)
+}
+
+/// Forge / 早期 NeoForge 的库版本形如 "1.20.1-47.2.0"，
+/// Modrinth 的 dependencies 需要纯加载器版本 "47.2.0"。
+fn strip_mc_prefix(ver: &str, mc_version: &str) -> String {
+    let prefix = format!("{}-", mc_version);
+    if !mc_version.is_empty() {
+        if let Some(rest) = ver.strip_prefix(&prefix) {
+            return rest.to_string();
+        }
+    }
+    // mc_version 未知时按 "x.y.z-loader" 形式兜底
+    if let Some((head, tail)) = ver.split_once('-') {
+        let head_is_version = head
+            .split('.')
+            .all(|p| !p.is_empty() && p.chars().all(|c| c.is_ascii_digit()));
+        if head_is_version && head.matches('.').count() >= 1 {
+            return tail.to_string();
+        }
+    }
+    ver.to_string()
+}
+
+/// 从客户端 jar 内的 version.json 读取 Minecraft 版本
+fn read_mc_version_from_jar(path: &Path) -> Option<String> {
+    let file = fs::File::open(path).ok()?;
+    let mut archive = zip::ZipArchive::new(file).ok()?;
+    let mut f = archive.by_name("version.json").ok()?;
+    let mut text = String::new();
+    std::io::Read::read_to_string(&mut f, &mut text).ok()?;
+    let v: serde_json::Value = serde_json::from_str(&text).ok()?;
+    v["id"]
+        .as_str()
+        .or_else(|| v["name"].as_str())
+        .map(String::from)
+}
+
+fn looks_like_mc_version(s: &str) -> bool {
+    let s = s.trim();
+    if let Some(rest) = s.strip_prefix("1.") {
+        let mut parts = rest.split('.');
+        return parts
+            .next()
+            .map(|p| !p.is_empty() && p.chars().all(|c| c.is_ascii_digit()))
+            .unwrap_or(false);
+    }
+    // 快照版本：24w14a / 25w01a
+    let b = s.as_bytes();
+    b.len() >= 5
+        && b[0].is_ascii_digit()
+        && b[1].is_ascii_digit()
+        && b[2] == b'w'
+        && b[3].is_ascii_digit()
+        && b[4].is_ascii_digit()
+}
+
+/// 从版本名里猜 Minecraft 版本（如 "1.20.1-fabric" → "1.20.1"）
+fn mc_version_from_name(name: &str) -> Option<String> {
+    let bytes = name.as_bytes();
+    for i in 0..bytes.len() {
+        if bytes[i] != b'1' || i + 1 >= bytes.len() || bytes[i + 1] != b'.' {
+            continue;
+        }
+        let mut j = i + 2;
+        while j < bytes.len() && (bytes[j].is_ascii_digit() || bytes[j] == b'.') {
+            j += 1;
+        }
+        let candidate = name[i..j].trim_end_matches('.');
+        if candidate.matches('.').count() >= 1 && looks_like_mc_version(candidate) {
+            return Some(candidate.to_string());
+        }
+    }
+    // 快照命名
+    for i in 0..bytes.len().saturating_sub(5) {
+        let candidate = &name[i..i + 5];
+        if looks_like_mc_version(candidate) {
+            return Some(candidate.to_string());
+        }
+    }
+    None
+}
+
+/// 综合判断 Minecraft 版本：客户端 jar → 加载器库前缀 → inheritsFrom → 版本名
+fn detect_mc_version(
+    version_dir: &Path,
+    version_name: &str,
+    json: &serde_json::Value,
+    loader_version: &str,
+) -> Option<String> {
+    let jar_path = version_dir.join(format!("{}.jar", version_name));
+    if let Some(v) = read_mc_version_from_jar(&jar_path) {
+        if looks_like_mc_version(&v) {
+            return Some(v);
+        }
+    }
+    if let Some((head, _)) = loader_version.split_once('-') {
+        if looks_like_mc_version(head) {
+            return Some(head.to_string());
+        }
+    }
+    if let Some(parent) = json["inheritsFrom"].as_str() {
+        if looks_like_mc_version(parent) {
+            return Some(parent.to_string());
+        }
+    }
+    mc_version_from_name(version_name)
+}
+
+fn mrpack_dependency_key(loader: &str) -> Option<&'static str> {
+    match loader {
+        "fabric" => Some("fabric-loader"),
+        "quilt" => Some("quilt-loader"),
+        "forge" => Some("forge"),
+        "neoforge" => Some("neoforge"),
+        _ => None,
+    }
+}
+
+fn mrpack_compression(rel: &str) -> zip::CompressionMethod {
+    let ext = Path::new(rel)
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    match ext.as_str() {
+        // 已压缩格式再 deflate 只会白耗 CPU
+        "jar" | "zip" | "png" | "jpg" | "jpeg" | "gif" | "webp" | "ogg" | "oga" | "mp3"
+        | "flac" | "m4a" | "mp4" | "webm" | "mkv" | "zst" | "lz4" | "7z" | "rar" | "gz"
+        | "xz" | "br" => zip::CompressionMethod::Stored,
+        _ => zip::CompressionMethod::Deflated,
+    }
+}
+
+fn mrpack_file_options(rel: &str, size: u64) -> zip::write::FileOptions {
+    zip::write::FileOptions::default()
+        .compression_method(mrpack_compression(rel))
+        .large_file(size >= 4 * 1024 * 1024 * 1024)
+}
+
+fn collect_export_entries(
+    root: &Path,
+    dir: &Path,
+    version_name: &str,
+    output: &Path,
+    tmp: &Path,
+    out: &mut Vec<ExportEntry>,
+) -> Result<(), String> {
+    let entries = fs::read_dir(dir).map_err(|e| format!("读取目录 {} 失败: {}", dir.display(), e))?;
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let name = entry.file_name().to_string_lossy().to_string();
+        let is_top_level = dir == root;
+        if is_excluded_export_entry(&name, is_top_level, version_name) {
+            continue;
+        }
+        let meta = match fs::symlink_metadata(&path) {
+            Ok(m) => m,
+            Err(_) => continue,
+        };
+        // 跳过符号链接：避免把实例目录外的文件打进包里，或陷入循环
+        if meta.file_type().is_symlink() {
+            continue;
+        }
+        if meta.is_dir() {
+            collect_export_entries(root, &path, version_name, output, tmp, out)?;
+        } else if meta.is_file() {
+            if path == output || path == tmp {
+                continue;
+            }
+            let rel = match path.strip_prefix(root) {
+                Ok(r) => r.to_string_lossy().replace('\\', "/"),
+                Err(_) => continue,
+            };
+            out.push(ExportEntry {
+                abs: path,
+                rel,
+                size: meta.len(),
+            });
+        }
+    }
+    Ok(())
+}
+
+/// 生成 .mrpack。on_progress(stage, current, total, percent)
+fn export_modpack_impl(
+    version_dir: &Path,
+    version_name: &str,
+    pack_name: &str,
+    output_path: &Path,
+    on_progress: &mut dyn FnMut(&str, usize, usize, f64),
+) -> Result<ModpackExportResult, String> {
+    if !version_dir.is_dir() {
+        return Err(format!("版本 {} 不存在", version_name));
+    }
+    let pack_name = pack_name.trim();
+    let pack_name = if pack_name.is_empty() { version_name } else { pack_name };
+
+    let json_path = version_dir.join(format!("{}.json", version_name));
+    let json_text = fs::read_to_string(&json_path)
+        .map_err(|e| format!("读取版本信息失败: {}", e))?;
+    let version_json: serde_json::Value =
+        serde_json::from_str(&json_text).map_err(|e| format!("解析版本信息失败: {}", e))?;
+
+    let (loader, loader_version) = detect_loader_from_libraries(&version_json, "");
+    if !loader.is_empty() && loader_version.is_empty() {
+        return Err(format!(
+            "无法识别 {} 加载器版本，无法导出整合包",
+            loader
+        ));
+    }
+    let mc_version = detect_mc_version(version_dir, version_name, &version_json, &loader_version)
+        .ok_or_else(|| {
+            "无法识别该版本的 Minecraft 版本（客户端 jar 缺少 version.json），无法导出整合包"
+                .to_string()
+        })?;
+
+    // 输出路径统一为 .mrpack 后缀
+    let mut output = output_path.to_path_buf();
+    let has_ext = output
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.eq_ignore_ascii_case("mrpack"))
+        .unwrap_or(false);
+    if !has_ext {
+        let mut s = output.into_os_string();
+        s.push(".mrpack");
+        output = PathBuf::from(s);
+    }
+    if let Some(parent) = output.parent() {
+        if !parent.as_os_str().is_empty() {
+            fs::create_dir_all(parent).map_err(|e| format!("创建导出目录失败: {}", e))?;
+        }
+    }
+
+    // 先写临时文件，成功后再替换，避免导出中断留下半个 .mrpack
+    let file_name = output
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_else(|| "modpack.mrpack".to_string());
+    let tmp = output.with_file_name(format!(".{}.{}.part", file_name, std::process::id()));
+    let _ = fs::remove_file(&tmp);
+
+    on_progress("collect", 0, 0, 0.0);
+    let mut entries = Vec::new();
+    collect_export_entries(version_dir, version_dir, version_name, &output, &tmp, &mut entries)?;
+    entries.sort_by(|a, b| a.rel.cmp(&b.rel));
+    let total_files = entries.len();
+    let total_bytes: u64 = entries.iter().map(|e| e.size).sum();
+
+    let mut dependencies = serde_json::Map::new();
+    dependencies.insert("minecraft".to_string(), json!(mc_version));
+    if let Some(key) = mrpack_dependency_key(&loader) {
+        dependencies.insert(key.to_string(), json!(loader_version));
+    }
+    let index = json!({
+        "formatVersion": 1,
+        "game": "minecraft",
+        "versionId": version_name,
+        "name": pack_name,
+        "summary": "Exported with Lumia Launcher",
+        "files": [],
+        "dependencies": dependencies,
+    });
+    let index_text = serde_json::to_string_pretty(&index)
+        .map_err(|e| format!("生成整合包索引失败: {}", e))?;
+
+    let result = (|| -> Result<(), String> {
+        let file = fs::File::create(&tmp).map_err(|e| format!("创建导出文件失败: {}", e))?;
+        let mut zip = zip::ZipWriter::new(file);
+
+        zip.start_file(
+            "modrinth.index.json",
+            mrpack_file_options("modrinth.index.json", index_text.len() as u64),
+        )
+        .map_err(|e| format!("写入整合包索引失败: {}", e))?;
+        zip.write_all(index_text.as_bytes())
+            .map_err(|e| format!("写入整合包索引失败: {}", e))?;
+
+        let mut done_bytes = 0u64;
+        for (i, entry) in entries.iter().enumerate() {
+            let zip_name = format!("overrides/{}", entry.rel);
+            zip.start_file(zip_name, mrpack_file_options(&entry.rel, entry.size))
+                .map_err(|e| format!("写入 {} 失败: {}", entry.rel, e))?;
+            let src = fs::File::open(&entry.abs)
+                .map_err(|e| format!("读取 {} 失败: {}", entry.rel, e))?;
+            let mut reader = std::io::BufReader::new(src);
+            std::io::copy(&mut reader, &mut zip)
+                .map_err(|e| format!("打包 {} 失败: {}", entry.rel, e))?;
+            done_bytes += entry.size;
+            let percent = if total_bytes > 0 {
+                done_bytes as f64 / total_bytes as f64 * 100.0
+            } else {
+                100.0
+            };
+            on_progress("pack", i + 1, total_files, percent.min(100.0));
+        }
+
+        let file = zip.finish().map_err(|e| format!("完成压缩包失败: {}", e))?;
+        drop(file);
+        Ok(())
+    })();
+
+    if let Err(e) = result {
+        let _ = fs::remove_file(&tmp);
+        return Err(e);
+    }
+
+    if output.exists() {
+        fs::remove_file(&output).map_err(|e| format!("覆盖已有文件失败: {}", e))?;
+    }
+    if let Err(e) = fs::rename(&tmp, &output) {
+        let _ = fs::remove_file(&tmp);
+        return Err(format!("保存整合包失败: {}", e));
+    }
+
+    let size = fs::metadata(&output).map(|m| m.len()).unwrap_or(0);
+    on_progress("done", total_files, total_files, 100.0);
+    Ok(ModpackExportResult {
+        path: output.to_string_lossy().to_string(),
+        file_count: total_files,
+        size,
+        minecraft: mc_version,
+        loader,
+        loader_version,
+    })
+}
+
+/// 导出当前版本为 Modrinth 整合包（.mrpack）
+#[tauri::command]
+async fn export_modpack(
+    app_handle: tauri::AppHandle,
+    window: Window,
+    version: String,
+    name: String,
+    output_path: String,
+) -> Result<ModpackExportResult, String> {
+    if output_path.trim().is_empty() {
+        return Err("请选择导出位置".to_string());
+    }
+    let game_dir = get_game_dir(&app_handle).await;
+    let version_dir = game_dir.join("versions").join(&version);
+    let output = PathBuf::from(output_path);
+
+    tokio::task::spawn_blocking(move || {
+        let progress_window = window.clone();
+        let mut on_progress = move |stage: &str, current: usize, total: usize, percent: f64| {
+            let _ = progress_window.emit(
+                "modpack-export-progress",
+                json!({
+                    "stage": stage,
+                    "current": current,
+                    "total": total,
+                    "percent": percent,
+                }),
+            );
+        };
+        export_modpack_impl(&version_dir, &version, &name, &output, &mut on_progress)
+    })
+    .await
+    .map_err(|e| format!("导出任务异常: {}", e))?
+}
+
+// ========== 3.15 陶瓦联机（Terracotta） ==========
 // 集成方式参考 HMCL（HMCL-dev/HMCL 的 terracotta 模块）：
 //   1. 运行 terracotta --hmcl <临时文件>，就绪后文件写入 {"port": N}
 //   2. HTTP API（http://127.0.0.1:{port}/）：
@@ -6772,7 +7263,7 @@ async fn ip_in_mainland_china() -> Option<bool> {
 }
 
 /// 统一解析「是否位于中国大陆」并把结果持久化到配置（断网时回落到上次成功判定的结果）。
-/// 各合规检查（离线模式、游戏本体下载）共用，避免重复请求 Cloudflare trace。
+/// 目前只服务离线模式判定，避免重复请求 Cloudflare trace。
 async fn resolve_is_mainland(state: &AppState) -> bool {
     let ip = ip_in_mainland_china().await; // 网络判定不持有配置锁
     let mut cfg = state.config.lock().await;
@@ -6798,14 +7289,6 @@ async fn offline_mode_allowed(app_handle: tauri::AppHandle) -> bool {
     let state = app_handle.state::<AppState>();
     let is_mainland = resolve_is_mainland(&state).await;
     is_mainland || state.config.lock().await.ever_launched_online
-}
-
-/// 是否允许下载 Minecraft 游戏本体（法律法规合规，供前端展示）：
-/// 中国大陆地区一律不提供游戏本体下载；非大陆或无法判定地区时允许。
-#[tauri::command]
-async fn game_download_allowed(app_handle: tauri::AppHandle) -> bool {
-    let state = app_handle.state::<AppState>();
-    !resolve_is_mainland(&state).await
 }
 
 // ========== 检测指定 PID 的进程是否已出现可见窗口（用于启动动画「等游戏窗口出现再消失」） ==========
@@ -8324,9 +8807,9 @@ async fn mark_changelog_seen(app_handle: tauri::AppHandle, version: String) -> R
 
 // ========== 7.3 自动检查更新（官方 API https://lumialauncher.cn/api.php?action=version） ==========
 
-/// 与官方 API 同格式的当前版本标识（API 返回如 "v1.0 RC 1"）。
-/// Cargo 版本 "1.0.0-rc.1" 与 "v1.0 RC 1" 是同一个版本，统一用它做比较基准。
-const CURRENT_VERSION_LABEL: &str = "v1.0 RC 1";
+/// 与官方 API 同格式的当前版本标识（API 返回如 "v1.0"）。
+/// Cargo 版本 "1.0.0" 与 "v1.0" 是同一个版本，统一用它做比较基准。
+const CURRENT_VERSION_LABEL: &str = "v1.0";
 
 /// 版本阶段：alpha < beta < RC < 正式版。同一阶段再比阶段号。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -9112,6 +9595,7 @@ fn main() {
             get_offline_uuid,
             inspect_modpack,
             install_modpack,
+            export_modpack,
             terracotta_start,
             terracotta_status,
             terracotta_host,
@@ -9121,7 +9605,6 @@ fn main() {
             is_game_running,
             terracotta_nodes_status,
             offline_mode_allowed,
-            game_download_allowed,
             ai_chat,
             ai_execute_file_ops,
             list_ai_models,
@@ -9418,4 +9901,239 @@ mod tests {
             }
         }
     }
+
+    #[test]
+    fn detect_loader_from_libraries_for_export() {
+        let fabric = serde_json::json!({
+            "libraries": [
+                { "name": "net.fabricmc:intermediary:1.20.1" },
+                { "name": "net.fabricmc:fabric-loader:0.16.10" }
+            ]
+        });
+        assert_eq!(
+            detect_loader_from_libraries(&fabric, "1.20.1"),
+            ("fabric".to_string(), "0.16.10".to_string())
+        );
+
+        let quilt = serde_json::json!({
+            "libraries": [{ "name": "org.quiltmc:quilt-loader:0.27.0" }]
+        });
+        assert_eq!(
+            detect_loader_from_libraries(&quilt, "1.21.1"),
+            ("quilt".to_string(), "0.27.0".to_string())
+        );
+
+        let forge = serde_json::json!({
+            "libraries": [
+                { "name": "net.minecraftforge:fmlloader:1.20.1-47.2.0" },
+                { "name": "net.minecraftforge:forge:1.20.1-47.2.0:universal" }
+            ]
+        });
+        assert_eq!(
+            detect_loader_from_libraries(&forge, "1.20.1"),
+            ("forge".to_string(), "47.2.0".to_string())
+        );
+
+        let neoforge = serde_json::json!({
+            "libraries": [{ "name": "net.neoforged:neoforge:21.1.166" }]
+        });
+        assert_eq!(
+            detect_loader_from_libraries(&neoforge, "1.21.1"),
+            ("neoforge".to_string(), "21.1.166".to_string())
+        );
+
+        // 老 Forge 版本号不带 MC 前缀
+        assert_eq!(strip_mc_prefix("10.13.4.1614", "1.7.10"), "10.13.4.1614");
+        // 无 mc_version 时也能剥掉前缀
+        assert_eq!(strip_mc_prefix("1.20.1-47.2.0", ""), "47.2.0");
+    }
+
+    #[test]
+    fn fabric_version_json_includes_intermediary() {
+        let root = std::env::temp_dir().join(format!(
+            "lumia-fabric-json-test-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).unwrap();
+        fs::write(
+            root.join("1.20.1.json"),
+            serde_json::json!({
+                "id": "1.20.1",
+                "libraries": [],
+                "arguments": { "game": [], "jvm": [] }
+            })
+            .to_string(),
+        )
+        .unwrap();
+
+        let meta = serde_json::json!({
+            "launcherMeta": {
+                "mainClass": { "client": "net.fabricmc.loader.impl.launch.knot.KnotClient" },
+                "libraries": {
+                    "client": [],
+                    "common": [{ "name": "net.fabricmc:sponge-mixin:0.15.5+mixin.0.8.7" }]
+                }
+            },
+            "intermediary": { "maven": "net.fabricmc:intermediary:1.20.1" }
+        });
+
+        modify_version_json_for_fabric(
+            &root,
+            "1.20.1",
+            "0.16.14",
+            &meta,
+            "net.fabricmc:fabric-loader:0.16.14",
+        )
+        .unwrap();
+
+        let parsed: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(root.join("1.20.1.json")).unwrap()).unwrap();
+        let names: Vec<&str> = parsed["libraries"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|l| l["name"].as_str())
+            .collect();
+        assert!(names.contains(&"net.fabricmc:fabric-loader:0.16.14"));
+        assert!(names.contains(&"net.fabricmc:intermediary:1.20.1"));
+        assert!(names.contains(&"net.fabricmc:sponge-mixin:0.15.5+mixin.0.8.7"));
+        assert_eq!(
+            parsed["mainClass"].as_str(),
+            Some("net.fabricmc.loader.impl.launch.knot.KnotClient")
+        );
+
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn detect_mc_version_fallbacks_for_export() {
+        assert!(looks_like_mc_version("1.20.1"));
+        assert!(looks_like_mc_version("24w14a"));
+        assert!(!looks_like_mc_version("v1.0"));
+        assert!(!looks_like_mc_version("47.2.0"));
+
+        assert_eq!(
+            mc_version_from_name("1.20.1-forge-47.2.0"),
+            Some("1.20.1".to_string())
+        );
+        assert_eq!(
+            mc_version_from_name("我的整合包 1.21"),
+            Some("1.21".to_string())
+        );
+
+        let json = serde_json::json!({ "inheritsFrom": "1.19.2" });
+        let empty_dir = std::env::temp_dir().join("lumia-nonexistent-version-dir");
+        assert_eq!(
+            detect_mc_version(&empty_dir, "MyPack", &json, ""),
+            Some("1.19.2".to_string())
+        );
+        // Forge 库版本前缀可作为兜底
+        let json = serde_json::json!({});
+        assert_eq!(
+            detect_mc_version(&empty_dir, "MyPack", &json, "1.18.2-40.2.0"),
+            Some("1.18.2".to_string())
+        );
+    }
+
+    fn write_test_client_jar(path: &Path, version: &str) {
+        let file = fs::File::create(path).unwrap();
+        let mut zip = zip::ZipWriter::new(file);
+        zip.start_file("version.json", zip::write::FileOptions::default())
+            .unwrap();
+        zip.write_all(format!("{{\"id\":\"{}\"}}", version).as_bytes())
+            .unwrap();
+        zip.finish().unwrap();
+    }
+
+    #[test]
+    fn export_modpack_writes_valid_mrpack() {
+        let root = std::env::temp_dir().join(format!(
+            "lumia-mrpack-export-test-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&root);
+        let vdir = root.join("versions").join("TestPack");
+        fs::create_dir_all(vdir.join("mods")).unwrap();
+        fs::create_dir_all(vdir.join("config")).unwrap();
+        fs::create_dir_all(vdir.join("saves").join("world")).unwrap();
+        fs::create_dir_all(vdir.join("logs")).unwrap();
+        fs::create_dir_all(vdir.join("resourcepacks")).unwrap();
+
+        fs::write(
+            vdir.join("TestPack.json"),
+            serde_json::json!({
+                "id": "TestPack",
+                "libraries": [{ "name": "net.fabricmc:fabric-loader:0.16.10" }]
+            })
+            .to_string(),
+        )
+        .unwrap();
+        write_test_client_jar(&vdir.join("TestPack.jar"), "1.20.1");
+        fs::write(vdir.join("mods/foo.jar"), b"mod").unwrap();
+        fs::write(vdir.join("mods/bar.jar.disabled"), b"mod").unwrap();
+        fs::write(vdir.join("config/test.toml"), "a=1").unwrap();
+        fs::write(vdir.join("options.txt"), "lang:en_us").unwrap();
+        fs::write(vdir.join("resourcepacks/pack.zip"), b"rp").unwrap();
+        fs::write(vdir.join("saves/world/level.dat"), b"world").unwrap();
+        fs::write(vdir.join("logs/latest.log"), b"log").unwrap();
+
+        let out = root.join("TestPack.mrpack");
+        let mut stages: Vec<String> = Vec::new();
+        let mut on_progress = |stage: &str, _c: usize, _t: usize, _p: f64| {
+            stages.push(stage.to_string());
+        };
+        let result =
+            export_modpack_impl(&vdir, "TestPack", "My Pack", &out, &mut on_progress).unwrap();
+
+        assert_eq!(result.minecraft, "1.20.1");
+        assert_eq!(result.loader, "fabric");
+        assert_eq!(result.loader_version, "0.16.10");
+        // mods/foo.jar、mods/bar.jar.disabled、config/test.toml、options.txt、resourcepacks/pack.zip
+        assert_eq!(result.file_count, 5);
+        assert!(stages.iter().any(|s| s == "done"));
+        assert!(result.size > 0);
+
+        // 导出的包必须能被本启动器自己的整合包识别逻辑读取
+        let info = parse_modpack_index(out.to_str().unwrap()).unwrap();
+        assert_eq!(info.format, "modrinth");
+        assert_eq!(info.mc_version, "1.20.1");
+        assert_eq!(info.loader, "fabric");
+        assert_eq!(info.loader_version, "0.16.10");
+        // overrides/mods 下的 2 个模组也要计入
+        assert_eq!(info.file_count, 2);
+
+        let file = fs::File::open(&out).unwrap();
+        let mut archive = zip::ZipArchive::new(file).unwrap();
+
+        let index: serde_json::Value = {
+            let f = archive.by_name("modrinth.index.json").unwrap();
+            serde_json::from_reader(f).unwrap()
+        };
+        assert_eq!(index["formatVersion"], 1);
+        assert_eq!(index["game"], "minecraft");
+        assert_eq!(index["name"], "My Pack");
+        assert_eq!(index["dependencies"]["minecraft"], "1.20.1");
+        assert_eq!(index["dependencies"]["fabric-loader"], "0.16.10");
+        assert!(index["files"].as_array().unwrap().is_empty());
+
+        let mut names = Vec::new();
+        for i in 0..archive.len() {
+            names.push(archive.by_index(i).unwrap().name().to_string());
+        }
+        assert!(names.contains(&"overrides/mods/foo.jar".to_string()));
+        assert!(names.contains(&"overrides/mods/bar.jar.disabled".to_string()));
+        assert!(names.contains(&"overrides/config/test.toml".to_string()));
+        assert!(names.contains(&"overrides/options.txt".to_string()));
+        assert!(names.contains(&"overrides/resourcepacks/pack.zip".to_string()));
+        // 用户存档、日志、版本元数据不能被打包
+        assert!(!names.iter().any(|n| n.contains("saves/")));
+        assert!(!names.iter().any(|n| n.contains("logs/")));
+        assert!(!names.contains(&"overrides/TestPack.json".to_string()));
+        assert!(!names.contains(&"overrides/TestPack.jar".to_string()));
+
+        let _ = fs::remove_dir_all(&root);
+    }
+
+
 }

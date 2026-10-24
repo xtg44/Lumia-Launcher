@@ -1,8 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
-import { getVersions, getLocalVersions, getIconUrl, gameDownloadAllowed } from '../utils/tauri'
+import { getVersions, getLocalVersions, getIconUrl } from '../utils/tauri'
 import { cleanSvg } from '../utils/svg'
-import { toast } from '../utils/toast'
 import ModView from './ModView.vue'
 import ResourcePackView from './ResourcePackView.vue'
 import ShaderPackView from './ShaderPackView.vue'
@@ -49,8 +48,6 @@ const searchQuery = ref('')
 const filterType = ref('')
 const loading = ref(false)
 const loadError = ref('')
-/** 合规：中国大陆地区不提供游戏本体下载（后端 download_game 同样会拦截） */
-const gameDownloadBlocked = ref(false)
 
 const filterOptions = computed(() => [
   { value: '', label: t('download.filterAll') },
@@ -152,20 +149,10 @@ async function loadVersions() {
 }
 
 function handleDownload(item: VersionItem) {
-  if (gameDownloadBlocked.value) {
-    toast(t('download.regionBlockedTip'), 'error')
-    return
-  }
   emit('download-request', item.version)
 }
 
-onMounted(async () => {
-  // 合规检查：中国大陆地区禁用游戏本体下载（查询失败时默认放行，与后端回落策略一致）
-  try {
-    gameDownloadBlocked.value = !(await gameDownloadAllowed())
-  } catch {
-    gameDownloadBlocked.value = false
-  }
+onMounted(() => {
   loadVersions()
 })
 </script>
@@ -214,15 +201,6 @@ onMounted(async () => {
       <AppSelect v-model="filterType" :options="filterOptions" />
     </div>
 
-    <div v-if="gameDownloadBlocked" class="region-notice">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <circle cx="12" cy="12" r="10" />
-        <line x1="12" y1="8" x2="12" y2="12" />
-        <line x1="12" y1="16" x2="12.01" y2="16" />
-      </svg>
-      <span>{{ t('download.regionBlocked') }}</span>
-    </div>
-
     <div class="table-header">
       <span class="header-item icon-header"></span>
       <span class="header-item version-header">{{ t('download.colVersion') }}</span>
@@ -261,10 +239,9 @@ onMounted(async () => {
         <span class="download-time">{{ item.releaseTime }}</span>
         <button 
           class="download-action-btn"
-          :class="{ installed: item.isInstalled, blocked: gameDownloadBlocked }"
-          :disabled="gameDownloadBlocked"
+          :class="{ installed: item.isInstalled }"
           @click="handleDownload(item)"
-          :title="gameDownloadBlocked ? t('download.regionBlockedTip') : (item.isInstalled ? t('download.reDownload') : t('download.download'))"
+          :title="item.isInstalled ? t('download.reDownload') : t('download.download')"
         >
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
@@ -383,27 +360,6 @@ onMounted(async () => {
   border-radius: 10px;
   margin-bottom: 12px;
   flex-shrink: 0;
-}
-.region-notice {
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
-  padding: 10px 12px;
-  margin-bottom: 12px;
-  border-radius: 10px;
-  background: var(--card-bg);
-  border: 1px solid var(--border-color);
-  color: var(--label-color);
-  font-size: 12px;
-  line-height: 1.5;
-  flex-shrink: 0;
-}
-.region-notice svg {
-  width: 16px;
-  height: 16px;
-  flex-shrink: 0;
-  margin-top: 1px;
-  color: #e0a03a;
 }
 .search-input {
   flex: 1;
@@ -580,23 +536,19 @@ onMounted(async () => {
   align-items: center;
   justify-content: center;
 }
-.download-card:hover .download-action-btn:not(.installed):not(.downloading):not(.blocked) {
+.download-card:hover .download-action-btn:not(.installed):not(.downloading) {
   opacity: 1;
 }
 .download-action-btn.installed {
   opacity: 0.4;
   cursor: default;
 }
-.download-action-btn.blocked {
-  opacity: 0.25;
-  cursor: not-allowed;
-}
 .download-action-btn.downloading {
   opacity: 1;
   cursor: not-allowed;
   animation: spin 1s linear infinite;
 }
-.download-action-btn:active:not(.installed):not(.downloading):not(.blocked) {
+.download-action-btn:active:not(.installed):not(.downloading) {
   transform: scale(0.92);
   background-color: var(--button-active);
 }
