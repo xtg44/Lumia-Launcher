@@ -4,179 +4,182 @@
 
 # Lumia Launcher
 
-**跨平台 Minecraft 启动器** · Tauri 2 + Rust + Vue 3
+**A cross-platform Minecraft launcher** · Tauri 2 + Rust + Vue 3
 
-[![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-4c6ef5?style=flat-square)](#下载安装)
-[![Version](https://img.shields.io/badge/version-1.0.0-e94560?style=flat-square)](#下载安装)
+[![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-4c6ef5?style=flat-square)](#installation)
+[![Version](https://img.shields.io/badge/version-1.0.0-e94560?style=flat-square)](#installation)
 [![Tauri](https://img.shields.io/badge/Tauri-2-24C8DB?style=flat-square&logo=tauri&logoColor=white)](https://tauri.app/)
 [![Vue](https://img.shields.io/badge/Vue-3-42b883?style=flat-square&logo=vuedotjs&logoColor=white)](https://vuejs.org/)
 [![Rust](https://img.shields.io/badge/Rust-stable-000000?style=flat-square&logo=rust&logoColor=white)](https://www.rust-lang.org/)
 [![License](https://img.shields.io/badge/license-MIT-3DA639?style=flat-square)](LICENSE)
 
-[官网](https://lumialauncher.cn) · [下载](https://lumialauncher.cn) · [插件语言文档](docs/lumi-reference.md) · [插件系统设计](docs/插件系统设计.md)
+[Website](https://lumialauncher.cn) · [Download](https://lumialauncher.cn) · [Lumi language reference](docs/lumi-reference.md) · [Plugin system design](docs/插件系统设计.md)
+
+**English** · [简体中文](README.zh-CN.md)
 
 </div>
 
 ---
 
-## 简介
+## Overview
 
-Lumia Launcher 是一个用 **Rust + Tauri 2** 构建的轻量跨平台 Minecraft 启动器，界面使用 **Vue 3 + TypeScript**。
+Lumia Launcher is a lightweight, cross-platform Minecraft launcher built with **Rust + Tauri 2**, with a **Vue 3 + TypeScript** interface.
 
-安装包体积小、启动快，内置完整的版本管理与资源下载能力，并提供一套自研插件语言 **Lumi**，让零编程基础的用户也能给启动器写扩展。
+It ships as a small installer, starts quickly, and includes full version management and content-download capabilities. It also comes with **Lumi**, a purpose-built plugin language that lets people with no programming background extend the launcher.
 
 <!--
-  截图占位：真实截图放在 .github/screenshots/ 或 docs/images/ 后取消注释即可
-  <p align="center"><img src="docs/images/home.png" width="720" alt="主页" /></p>
+  Screenshot placeholder: add real screenshots under .github/screenshots/ or docs/images/ and uncomment.
+  <p align="center"><img src="docs/images/home.png" width="720" alt="Home screen" /></p>
 -->
 
-## 功能特性
+## Features
 
-### 🎮 游戏与版本
-- **多版本管理** —— 原版及 **Forge / NeoForge / Fabric / Quilt** 加载器版本的安装、更新与删除
-- **一键启动**，自动匹配合适的 Java 版本
-- **Microsoft 账号登录**（完整的 MS → XBL → XSTS → Minecraft 令牌链）
-- **联机支持**（基于 Terracotta）
-- **崩溃报告**查看，启动异常可直接定位日志
-- macOS 支持 **Touch Bar** 操作
+### 🎮 Game and versions
+- **Multi-version management** — install, update, and remove vanilla and **Forge / NeoForge / Fabric / Quilt** instances
+- **One-click launch** with automatic Java version matching
+- **Microsoft account sign-in** (full MS → XBL → XSTS → Minecraft token chain)
+- **Multiplayer support** (powered by Terracotta)
+- **Crash report viewer** that points directly to the relevant log when startup fails
+- **Touch Bar** support on macOS
 
-### 📦 资源下载
-- 版本、Mod、整合包、资源包、光影包一站式下载安装，支持把已安装版本导出为 `.mrpack` 整合包
-- 接入 **BMCLAPI** 国内镜像，下载免代理
-- 同时支持 **Modrinth** 与 **CurseForge** 生态
+### 📦 Content downloads
+- One-stop download and installation for versions, mods, modpacks, resource packs, and shaders, plus export of installed instances as `.mrpack` modpacks
+- **BMCLAPI** mirror support for users in China, with no proxy required
+- Support for both the **Modrinth** and **CurseForge** ecosystems
 
-### 🎵 体验
-- 内置**音乐播放器**与常驻播放条
-- 内置 **AI 助手**面板
-- **深色主题**，界面简洁扁平
-- **7 种界面语言**：简体中文 / 繁體中文（中国台湾 / 中国香港）/ English / 日本語 / 한국어 / Français
+### 🎵 Experience
+- Built-in **music player** with a persistent playback bar
+- Built-in **AI assistant** panel
+- **Dark theme** with a clean, flat interface
+- **7 interface languages**: Simplified Chinese, Traditional Chinese (Taiwan), Traditional Chinese (Hong Kong), English, Japanese, Korean, and French
 
-### 🧩 插件系统（Lumi）
-- 自研 **Lumi 插件语言**：类 Python 缩进语法、极简英文关键词，**零编程基础可读**
-- `.lplugin` 插件包 = zip 改后缀，可含脚本与资源文件
-- 事件驱动模型（`listen 控件.事件`），UI 由脚本解释出的控件树驱动
-- 支持压缩包 / 文件夹 / 单文件三种安装形态
-- 详见 [Lumi 语言完整参考](docs/lumi-reference.md) 与 [插件系统设计](docs/插件系统设计.md)
+### 🧩 Plugin system (Lumi)
+- A purpose-built **Lumi plugin language**: Python-like indentation, minimal English keywords, and **readable without any programming background**
+- A `.lplugin` package is a zip file with a different extension and may contain scripts and assets
+- Event-driven model (`listen widget.event`); the UI is driven by a widget tree interpreted from the script
+- Supports installation from a zip archive, a folder, or a single file
+- See the [Lumi language reference](docs/lumi-reference.md) and [plugin system design](docs/插件系统设计.md) (currently in Chinese)
 
-### 🔧 其他
-- Java 路径自动扫描与手动指定、内存分配配置
-- 应用内自动更新检查与更新日志
+### 🔧 Other
+- Automatic Java path detection and manual selection, plus memory allocation settings
+- In-app update checks and changelogs
 
-## 下载安装
+## Installation
 
-前往官网 **[lumialauncher.cn](https://lumialauncher.cn)**，页面会自动识别你的平台并给出对应安装包；各平台安装包也会同步发布到 [GitHub Releases](https://github.com/xtg44/Lumia-Launcher/releases)：
+Visit **[lumialauncher.cn](https://lumialauncher.cn)**. The site detects your platform and offers the matching installer. All platform builds are also published on [GitHub Releases](https://github.com/xtg44/Lumia-Launcher/releases):
 
-| 平台 | 安装包 |
+| Platform | Package |
 |---|---|
 | Windows 10+ | `.exe` |
-| macOS 10.15+ | `.dmg`（Apple Silicon / Intel） |
-| Linux x64 | `.deb`（Debian / Ubuntu，GitHub Releases 下载） |
+| macOS 10.15+ | `.dmg` (Apple Silicon / Intel) |
+| Linux x64 | `.deb` (Debian / Ubuntu, available on GitHub Releases) |
 
-> **v1.0 正式版**已发布（2026-10-24），欢迎反馈问题。
+> **v1.0 stable** was released on 2026-10-24. Feedback is welcome.
 
-> **说明**：游戏本体文件由启动器在安装版本时从 Mojang 官方源（及 BMCLAPI 镜像）按需下载，
-> 安装包本身不包含、也不分发任何游戏文件。
+> **Note**: game files are downloaded on demand by the launcher from Mojang's official sources (and the BMCLAPI mirror) when you install a version.
+> The installer itself does not contain or distribute any game files.
 
-## 技术栈
+## Tech stack
 
-| 层 | 技术 |
+| Layer | Technology |
 |---|---|
-| 桌面框架 | Tauri 2 |
-| 后端 | Rust（约 12,000 行，6 个模块） |
-| 前端 | Vue 3.5（Composition API + `<script setup>`）+ TypeScript 5.6 |
-| 构建 | Vite 6 |
-| 国际化 | vue-i18n 11 |
-| 图标 / 渲染 | @iconify/vue、markdown-it、qrcode-generator |
+| Desktop framework | Tauri 2 |
+| Backend | Rust (about 12,000 lines across 6 modules) |
+| Frontend | Vue 3.5 (Composition API + `<script setup>`) + TypeScript 5.6 |
+| Build | Vite 6 |
+| Internationalization | vue-i18n 11 |
+| Icons / rendering | @iconify/vue, markdown-it, qrcode-generator |
 
-Rust 后端模块划分：
+Rust backend modules:
 
-| 模块 | 职责 |
+| Module | Responsibility |
 |---|---|
-| `main.rs` | 核心命令、版本解析、下载与启动逻辑 |
-| `lumi.rs` | Lumi 插件语言解释器 |
-| `plugins.rs` | 插件加载、注册与生命周期 |
-| `music.rs` | 音乐播放 |
-| `auth.rs` | Microsoft 登录与令牌刷新 |
-| `touchbar.rs` | macOS Touch Bar 集成 |
+| `main.rs` | Core commands, version parsing, download and launch logic |
+| `lumi.rs` | Lumi plugin language interpreter |
+| `plugins.rs` | Plugin loading, registration, and lifecycle |
+| `music.rs` | Music playback |
+| `auth.rs` | Microsoft sign-in and token refresh |
+| `touchbar.rs` | macOS Touch Bar integration |
 
-## 项目结构
+## Project structure
 
 ```
 Lumia Launcher/
-├── src/                  # Vue 3 前端
-│   ├── components/       # 24 个视图与组件
-│   ├── i18n/             # 7 种语言
-│   ├── utils/            # tauri.ts 统一封装 invoke、svg.ts 等
+├── src/                  # Vue 3 frontend
+│   ├── components/       # 24 views and components
+│   ├── i18n/             # 7 languages
+│   ├── utils/            # tauri.ts invoke wrapper, svg.ts, etc.
 │   └── App.vue
-├── src-tauri/            # Rust 后端
-│   ├── src/              # 6 个模块
-│   ├── capabilities/     # Tauri 权限声明
-│   ├── icons/            # 各平台图标
+├── src-tauri/            # Rust backend
+│   ├── src/              # 6 modules
+│   ├── capabilities/     # Tauri permission declarations
+│   ├── icons/            # Platform icons
 │   └── tauri.conf.json
-├── docs/                 # 插件语言参考、插件系统设计、开发指南
-├── public/               # 静态资源（图标、皮肤等）
+├── docs/                 # Plugin language reference, plugin system design, development guide
+├── public/               # Static assets (icons, skins, etc.)
 └── package.json
 ```
 
-## 本地开发
+## Local development
 
-### 环境要求
+### Requirements
 
 - [Node.js](https://nodejs.org/) 18+
-- [Rust](https://rustup.rs/) 稳定版
-- 各平台 Tauri 系统依赖（见 [Tauri 前置要求](https://tauri.app/start/prerequisites/)）
+- [Rust](https://rustup.rs/) stable
+- Tauri system dependencies for your platform (see [Tauri prerequisites](https://tauri.app/start/prerequisites/))
 
-### 启动
+### Getting started
 
 ```bash
 git clone https://github.com/xtg44/Lumia-Launcher.git
 cd Lumia-Launcher
 npm install
-npm run tauri dev        # 启动开发窗口（前端热重载）
+npm run tauri dev        # Opens the development window with frontend hot reload
 ```
 
-### 构建安装包
+### Building installers
 
 ```bash
-npm run tauri build                                    # 当前平台
+npm run tauri build                                    # Current platform
 
-# macOS 指定架构
+# macOS: choose a target architecture
 rustup target add x86_64-apple-darwin                  # Intel
 npm run tauri build -- --target x86_64-apple-darwin
-npm run tauri build -- --target universal-apple-darwin # 通用包
+npm run tauri build -- --target universal-apple-darwin # Universal binary
 ```
 
-产物位置：
+Build output:
 
-| 平台 | 路径 |
+| Platform | Path |
 |---|---|
 | macOS | `src-tauri/target/<triple>/release/bundle/dmg/*.dmg` |
 | Windows | `src-tauri/target/release/bundle/nsis/*.exe` |
 | Linux | `src-tauri/target/release/bundle/{deb,appimage}/*` |
 
-> Windows 上交叉编译可配合 [`cargo-xwin`](https://github.com/rust-cross/cargo-xwin)：`tauri build --runner cargo-xwin --target x86_64-pc-windows-msvc`。
+> For cross-compiling on Windows, you can use [`cargo-xwin`](https://github.com/rust-cross/cargo-xwin): `tauri build --runner cargo-xwin --target x86_64-pc-windows-msvc`.
 
-## 参与贡献
+## Contributing
 
-欢迎提交 Issue 与 Pull Request。
+Issues and pull requests are welcome.
 
-- Bug 反馈请附上**系统版本、启动器版本、复现步骤**，涉及启动失败时请附崩溃报告或日志
-- 提交代码前请确保 `npm run build`（含 `vue-tsc` 类型检查）通过
-- 新增界面文案请同步补齐 `src/i18n/` 下的语言文件
+- For bug reports, include your **OS version, launcher version, and reproduction steps**. If the launcher fails to start, attach the crash report or logs.
+- Before submitting code, make sure `npm run build` passes, including the `vue-tsc` type check.
+- When adding UI text, update the language files under `src/i18n/` as well.
 
-前端开发规范与后端命令接口说明见 [docs/前端开发指南.md](docs/前端开发指南.md)。
+See the [frontend development guide](docs/前端开发指南.md) (currently in Chinese) for frontend conventions and backend command interfaces.
 
-## 许可证
-本项目采用 **MIT License** 发布，完整条款见 [LICENSE](LICENSE)。
+## License
+
+This project is released under the **MIT License**. See [LICENSE](LICENSE) for the full terms.
 
 Copyright (c) 2026 Lumia
 
-你可以自由使用、修改、分发本项目，包括商业用途，只需保留版权声明与许可声明。
+You are free to use, modify, and distribute this project, including for commercial purposes, as long as you retain the copyright and license notices.
 
 ---
 
 <div align="center">
 
-[Minecraft](https://www.minecraft.net/) 是 Mojang Studios 的商标。本项目与 Mojang Studios 及 Microsoft 无任何关联。
+[Minecraft](https://www.minecraft.net/) is a trademark of Mojang Studios. This project is not affiliated with Mojang Studios or Microsoft.
 
 </div>
