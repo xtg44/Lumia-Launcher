@@ -444,38 +444,32 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="manage-content">
-    <div class="manage-header">
-      <button class="back-btn" @click="emit('back')" :title="$t('versionManage.back')">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <polyline points="15 18 9 12 15 6" />
-        </svg>
+  <div class="manage-layout">
+    <aside class="manage-nav">
+      <div
+        class="nav-indicator"
+        :style="{ transform: `translateY(${activeTabIndex * 62 + 9}px)` }"
+      ></div>
+      <button
+        v-for="tab in tabs"
+        :key="tab.id"
+        class="nav-item"
+        :class="{ active: activeTab === tab.id }"
+        @click="activeTab = tab.id"
+      >
+        <span class="nav-icon" v-html="tab.icon"></span>
+        <span class="nav-label">{{ $t(tab.label) }}</span>
       </button>
-      <div class="manage-heading">
-        <span class="manage-title">{{ $t('versionManage.title') }}</span>
-        <span class="manage-subtitle">{{ version }} · {{ loader }}</span>
-      </div>
-      <div class="header-spacer"></div>
-    </div>
+    </aside>
 
-    <div class="manage-layout">
-      <aside class="manage-nav">
-        <div
-          class="nav-indicator"
-          :style="{ transform: `translateY(${activeTabIndex * 62 + 12}px)` }"
-        ></div>
-        <nav class="nav-menu">
-          <button
-            v-for="tab in tabs"
-            :key="tab.id"
-            class="nav-item"
-            @click="activeTab = tab.id"
-          >
-            <span class="nav-icon" v-html="tab.icon"></span>
-            <span class="nav-label">{{ $t(tab.label) }}</span>
-          </button>
-        </nav>
-      </aside>
+    <div class="manage-main">
+      <div class="manage-toolbar">
+        <button class="back-btn" @click="emit('back')" :title="$t('versionManage.back')">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polyline points="15 18 9 12 15 6" />
+          </svg>
+        </button>
+      </div>
 
       <div class="manage-panel">
         <!-- 概览 -->
@@ -706,8 +700,9 @@ onUnmounted(() => {
         </div>
       </div>
     </div>
+  </div>
 
-    <Teleport to="body">
+  <Teleport to="body">
       <div v-if="previewShot" class="shot-lightbox" @click.self="closePreview">
         <button class="shot-lightbox-close" :title="$t('common.close')" @click="closePreview">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -721,83 +716,24 @@ onUnmounted(() => {
         />
         <div class="shot-lightbox-caption">{{ previewShot.fileName }}</div>
       </div>
-    </Teleport>
-  </div>
+  </Teleport>
 </template>
 
 <style scoped>
-.manage-content {
+.manage-layout {
   width: 100%;
   height: 100%;
   display: flex;
-  flex-direction: column;
-  padding: 10px 17px;
-  box-sizing: border-box;
-}
-.manage-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 8px 0;
-  border-bottom: 1px solid var(--border-color);
-  flex-shrink: 0;
-}
-.back-btn {
-  background: none;
-  border: none;
-  cursor: pointer;
-  padding: 6px;
-  border-radius: 6px;
-  color: var(--text-color);
-  transition: background-color 150ms ease;
-}
-.back-btn:active {
-  transform: scale(0.92);
-  background-color: var(--button-active);
-}
-.back-btn svg {
-  width: 22px;
-  height: 22px;
-}
-.manage-heading {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 2px;
-  min-width: 0;
-}
-.manage-title {
-  font-family: Inter, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', SimHei, Arial, Helvetica, sans-serif;
-  font-size: 18px;
-  font-weight: 600;
-  color: var(--text-color);
-}
-.manage-subtitle {
-  max-width: 100%;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-family: Inter, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', SimHei, Arial, Helvetica, sans-serif;
-  font-size: 10px;
-  color: var(--label-color);
-}
-.header-spacer {
-  width: 34px;
-}
-
-.manage-layout {
-  flex: 1;
-  min-height: 0;
-  display: flex;
-  margin-top: 8px;
 }
 .manage-nav {
   width: 60px;
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
-  padding: 0;
-  border-right: 1px solid var(--sidebar-border);
+  align-items: center;
+  padding: 5px 0 0;
+  border-right: 1px solid var(--border-color);
   box-sizing: border-box;
   position: relative;
 }
@@ -812,28 +748,6 @@ onUnmounted(() => {
   transition: transform 0.4s cubic-bezier(0.34, 1.2, 0.64, 1);
   pointer-events: none;
 }
-.nav-menu {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  padding: 2px 0 0;
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-}
-.nav-menu::before,
-.nav-menu::after {
-  content: '';
-  display: block;
-  flex-shrink: 0;
-}
-.nav-menu::before {
-  height: 6px;
-}
-.nav-menu::after {
-  height: 16px;
-}
 .nav-item {
   display: flex;
   flex-direction: column;
@@ -841,12 +755,12 @@ onUnmounted(() => {
   justify-content: center;
   width: 50px;
   height: 58px;
-  padding: 0;
-  background: none;
-  border: none;
-  cursor: pointer;
-  border-radius: 10px;
   margin-bottom: 4px;
+  padding: 0;
+  border: none;
+  border-radius: 10px;
+  background: none;
+  cursor: pointer;
   position: relative;
   z-index: 1;
   transition: transform 100ms ease;
@@ -855,12 +769,10 @@ onUnmounted(() => {
   transform: scale(0.95);
 }
 .nav-icon {
-  width: 22px;
-  height: 22px;
+  width: 26px;
+  height: 26px;
   display: block;
   color: var(--text-color);
-  margin-bottom: 3px;
-  flex-shrink: 0;
 }
 .nav-icon svg {
   width: 100%;
@@ -868,24 +780,67 @@ onUnmounted(() => {
   display: block;
 }
 .nav-label {
-  font-family: Inter, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', SimHei, Arial, Helvetica, sans-serif;
-  font-size: 11px;
-  color: var(--text-color);
+  font-family: Inter, 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  font-size: 10px;
   line-height: 13px;
-  max-width: 50px;
-  text-align: center;
-  overflow-wrap: anywhere;
+  color: var(--text-color);
+  opacity: 0.7;
+  white-space: nowrap;
+}
+.nav-item.active .nav-label {
+  opacity: 1;
+  font-weight: 600;
+}
+
+.manage-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.manage-toolbar {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  padding: 6px 17px 0;
+}
+.back-btn {
+  width: 30px;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-left: -5px;
+  padding: 0;
+  background: none;
+  border: none;
+  border-radius: 6px;
+  color: var(--text-color);
+  cursor: pointer;
+  transition: background-color 150ms ease;
+}
+.back-btn:active {
+  transform: scale(0.92);
+  background-color: var(--button-active);
+}
+.back-btn svg {
+  width: 22px;
+  height: 22px;
 }
 
 .manage-panel {
   flex: 1;
   min-width: 0;
   min-height: 0;
+  padding: 2px 17px 10px;
+  box-sizing: border-box;
+  overflow: hidden;
 }
 .tab-panel {
   height: 100%;
   overflow-y: auto;
-  padding: 16px 18px;
+  padding: 8px 0 10px;
   box-sizing: border-box;
   display: flex;
   flex-direction: column;
