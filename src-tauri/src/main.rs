@@ -4653,6 +4653,151 @@ async fn open_mods_folder(app_handle: tauri::AppHandle, version: String) -> Resu
     open::that(&mods_dir).map_err(|e| format!("打开文件夹失败: {}", e))
 }
 
+// ========== 版本详情：截图 ==========
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ScreenshotFileInfo {
+    file_name: String,
+    size: u64,
+    modified: u64,
+}
+
+/// 截图文件名只允许是单层文件名，避免 `../` 之类的路径穿越。
+fn valid_screenshot_file_name(file_name: &str) -> bool {
+    if file_name.is_empty()
+        || file_name == "."
+        || file_name == ".."
+        || file_name.contains('/')
+        || file_name.contains('\\')
+    {
+        return false;
+    }
+    Path::new(file_name).components().count() == 1
+}
+
+fn is_screenshot_file(path: &Path) -> bool {
+    path.extension()
+        .and_then(|ext| ext.to_str())
+        .map(|ext| {
+            matches!(
+                ext.to_ascii_lowercase().as_str(),
+                "png" | "jpg" | "jpeg" | "webp"
+            )
+        })
+        .unwrap_or(false)
+}
+
+fn screenshot_mime(path: &Path) -> &'static str {
+    match path
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .map(|ext| ext.to_ascii_lowercase())
+        .as_deref()
+    {
+        Some("jpg") | Some("jpeg") => "image/jpeg",
+        Some("webp") => "image/webp",
+        _ => "image/png",
+    }
+}
+
+/// 列出某版本 screenshots 目录下的图片，按修改时间倒序。
+#[tauri::command]
+async fn list_screenshots(
+    app_handle: tauri::AppHandle,
+    version: String,
+) -> Result<Vec<ScreenshotFileInfo>, String> {
+    let game_dir = get_game_dir(&app_handle).await;
+    let shots_dir = game_dir.join("versions").join(&version).join("screenshots");
+    let mut shots = Vec::new();
+    if let Ok(entries) = fs::read_dir(&shots_dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if !path.is_file() || !is_screenshot_file(&path) {
+                continue;
+            }
+            let meta = match fs::metadata(&path) {
+                Ok(meta) => meta,
+                Err(_) => continue,
+            };
+            let modified = meta
+                .modified()
+                .ok()
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|d| d.as_millis() as u64)
+                .unwrap_or(0);
+            shots.push(ScreenshotFileInfo {
+                file_name: entry.file_name().to_string_lossy().to_string(),
+                size: meta.len(),
+                modified,
+            });
+        }
+    }
+    shots.sort_by(|a, b| b.modified.cmp(&a.modified).then_with(|| a.file_name.cmp(&b.file_name)));
+    Ok(shots)
+}
+
+/// 读取单张截图并以 data URL 返回，避免自定义游戏目录不在 asset 协议范围内。
+#[tauri::command]
+async fn read_screenshot(
+    app_handle: tauri::AppHandle,
+    version: String,
+    file_name: String,
+) -> Result<String, String> {
+    if !valid_screenshot_file_name(&file_name) {
+        return Err("无效的截图文件名".to_string());
+    }
+    let game_dir = get_game_dir(&app_handle).await;
+    let path = game_dir
+        .join("versions")
+        .join(&version)
+        .join("screenshots")
+        .join(&file_name);
+    if !path.is_file() || !is_screenshot_file(&path) {
+        return Err("截图不存在".to_string());
+    }
+    let size = fs::metadata(&path).map_err(|e| e.to_string())?.len();
+    if size > 32 * 1024 * 1024 {
+        return Err("截图文件过大（超过 32 MB）".to_string());
+    }
+    let bytes = fs::read(&path).map_err(|e| format!("读取截图失败: {}", e))?;
+    use base64::Engine;
+    Ok(format!(
+        "data:{};base64,{}",
+        screenshot_mime(&path),
+        base64::engine::general_purpose::STANDARD.encode(bytes)
+    ))
+}
+
+/// 打开某版本的 screenshots 文件夹
+#[tauri::command]
+async fn open_screenshots_folder(
+    app_handle: tauri::AppHandle,
+    version: String,
+) -> Result<(), String> {
+    let game_dir = get_game_dir(&app_handle).await;
+    let shots_dir = game_dir.join("versions").join(&version).join("screenshots");
+    fs::create_dir_all(&shots_dir).map_err(|e| e.to_string())?;
+    open::that(&shots_dir).map_err(|e| format!("打开文件夹失败: {}", e))
+}
+
+/// 打开某版本的根目录
+#[tauri::command]
+async fn open_version_folder(app_handle: tauri::AppHandle, version: String) -> Result<(), String> {
+    let game_dir = get_game_dir(&app_handle).await;
+    let version_dir = game_dir.join("versions").join(&version);
+    fs::create_dir_all(&version_dir).map_err(|e| e.to_string())?;
+    open::that(&version_dir).map_err(|e| format!("打开文件夹失败: {}", e))
+}
+
+/// 打开某版本的 logs 文件夹
+#[tauri::command]
+async fn open_version_logs(app_handle: tauri::AppHandle, version: String) -> Result<(), String> {
+    let game_dir = get_game_dir(&app_handle).await;
+    let logs_dir = game_dir.join("versions").join(&version).join("logs");
+    fs::create_dir_all(&logs_dir).map_err(|e| e.to_string())?;
+    open::that(&logs_dir).map_err(|e| format!("打开文件夹失败: {}", e))
+}
+
 // ========== 3.13 整合包安装（Modrinth .mrpack / CurseForge .zip） ==========
 
 #[derive(serde::Serialize, Clone)]
@@ -9592,6 +9737,11 @@ fn main() {
             toggle_mod,
             delete_mod,
             open_mods_folder,
+            list_screenshots,
+            read_screenshot,
+            open_screenshots_folder,
+            open_version_folder,
+            open_version_logs,
             get_offline_uuid,
             inspect_modpack,
             install_modpack,
@@ -9738,6 +9888,23 @@ mod tests {
         assert!(apply_ai_file_op(&base_canon, &missing_op).is_err());
 
         let _ = fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn screenshot_file_names_are_sandboxed() {
+        assert!(valid_screenshot_file_name("2026-10-31_12.00.00.png"));
+        assert!(valid_screenshot_file_name("shot.JPG"));
+        assert!(!valid_screenshot_file_name(""));
+        assert!(!valid_screenshot_file_name("../secret.png"));
+        assert!(!valid_screenshot_file_name("nested/shot.png"));
+        assert!(!valid_screenshot_file_name("nested\\shot.png"));
+        assert!(!valid_screenshot_file_name(".."));
+
+        assert!(is_screenshot_file(Path::new("a.png")));
+        assert!(is_screenshot_file(Path::new("a.JPEG")));
+        assert!(is_screenshot_file(Path::new("a.webp")));
+        assert!(!is_screenshot_file(Path::new("a.txt")));
+        assert!(!is_screenshot_file(Path::new("a.png.disabled")));
     }
 
     #[test]

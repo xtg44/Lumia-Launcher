@@ -309,6 +309,32 @@ export async function openModsFolder(version: string): Promise<void> {
   await invoke('open_mods_folder', { version })
 }
 
+export interface ScreenshotFileInfo {
+  fileName: string
+  size: number
+  modified: number
+}
+
+export async function listScreenshots(version: string): Promise<ScreenshotFileInfo[]> {
+  return await invoke('list_screenshots', { version })
+}
+
+export async function readScreenshot(version: string, fileName: string): Promise<string> {
+  return await invoke('read_screenshot', { version, fileName })
+}
+
+export async function openScreenshotsFolder(version: string): Promise<void> {
+  await invoke('open_screenshots_folder', { version })
+}
+
+export async function openVersionFolder(version: string): Promise<void> {
+  await invoke('open_version_folder', { version })
+}
+
+export async function openVersionLogs(version: string): Promise<void> {
+  await invoke('open_version_logs', { version })
+}
+
 export async function getOfflineUuid(username: string): Promise<{ uuid: string; skinIndex: number; skinName: string; slim: boolean }> {
   return await invoke('get_offline_uuid', { username })
 }
