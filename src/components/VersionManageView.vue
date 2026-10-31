@@ -24,7 +24,8 @@ import {
 } from '../utils/tauri'
 import modRaw from '../assets/icons/mod.svg?raw'
 import infoRaw from '../assets/icons/info.svg?raw'
-import settingsRaw from '../assets/icons/settings.svg?raw'
+import pictureRaw from '../assets/icons/picture.svg?raw'
+import otherRaw from '../assets/icons/other.svg?raw'
 
 const { t } = useI18n()
 
@@ -46,8 +47,8 @@ type ManageTab = 'overview' | 'mods' | 'screenshots' | 'other'
 
 const modIcon = cleanSvg(modRaw)
 const infoIcon = cleanSvg(infoRaw)
-const settingsIcon = cleanSvg(settingsRaw)
-const screenshotsIcon = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2.5"/><circle cx="9" cy="10" r="1.6"/><path d="m21 15-4.5-4.5L7 20"/></svg>`
+const screenshotsIcon = cleanSvg(pictureRaw)
+const otherIcon = cleanSvg(otherRaw)
 
 const activeTab = ref<ManageTab>('overview')
 
@@ -56,7 +57,7 @@ const tabs = computed(() => {
     { id: 'overview' as const, label: 'versionManage.tabOverview', icon: infoIcon },
     { id: 'mods' as const, label: 'versionManage.tabMods', icon: modIcon },
     { id: 'screenshots' as const, label: 'versionManage.tabScreenshots', icon: screenshotsIcon },
-    { id: 'other' as const, label: 'versionManage.tabOther', icon: settingsIcon },
+    { id: 'other' as const, label: 'versionManage.tabOther', icon: otherIcon },
   ]
   return isVanilla.value ? list.filter((tab) => tab.id !== 'mods') : list
 })
