@@ -462,18 +462,19 @@ onUnmounted(() => {
       <aside class="manage-nav">
         <div
           class="nav-indicator"
-          :style="{ transform: `translateY(${activeTabIndex * 62 + 9}px)` }"
+          :style="{ transform: `translateY(${activeTabIndex * 62 + 12}px)` }"
         ></div>
-        <button
-          v-for="tab in tabs"
-          :key="tab.id"
-          class="nav-item"
-          :class="{ active: activeTab === tab.id }"
-          @click="activeTab = tab.id"
-        >
-          <span class="nav-icon" v-html="tab.icon"></span>
-          <span class="nav-label">{{ $t(tab.label) }}</span>
-        </button>
+        <nav class="nav-menu">
+          <button
+            v-for="tab in tabs"
+            :key="tab.id"
+            class="nav-item"
+            @click="activeTab = tab.id"
+          >
+            <span class="nav-icon" v-html="tab.icon"></span>
+            <span class="nav-label">{{ $t(tab.label) }}</span>
+          </button>
+        </nav>
       </aside>
 
       <div class="manage-panel">
@@ -791,13 +792,12 @@ onUnmounted(() => {
   margin-top: 8px;
 }
 .manage-nav {
-  width: 62px;
+  width: 60px;
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
-  align-items: center;
-  padding: 5px 0 0;
-  border-right: 1px solid var(--border-color);
+  padding: 0;
+  border-right: 1px solid var(--sidebar-border);
   box-sizing: border-box;
   position: relative;
 }
@@ -805,26 +805,48 @@ onUnmounted(() => {
   position: absolute;
   top: 0;
   left: 5px;
-  width: 52px;
+  width: 50px;
   height: 50px;
   border-radius: 10px;
   background: var(--indicator-bg);
   transition: transform 0.4s cubic-bezier(0.34, 1.2, 0.64, 1);
   pointer-events: none;
 }
+.nav-menu {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 2px 0 0;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.nav-menu::before,
+.nav-menu::after {
+  content: '';
+  display: block;
+  flex-shrink: 0;
+}
+.nav-menu::before {
+  height: 6px;
+}
+.nav-menu::after {
+  height: 16px;
+}
 .nav-item {
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  width: 52px;
+  width: 50px;
   height: 58px;
-  margin-bottom: 4px;
   padding: 0;
-  border: none;
-  border-radius: 10px;
   background: none;
+  border: none;
   cursor: pointer;
+  border-radius: 10px;
+  margin-bottom: 4px;
   position: relative;
   z-index: 1;
   transition: transform 100ms ease;
@@ -833,10 +855,12 @@ onUnmounted(() => {
   transform: scale(0.95);
 }
 .nav-icon {
-  width: 26px;
-  height: 26px;
+  width: 22px;
+  height: 22px;
   display: block;
   color: var(--text-color);
+  margin-bottom: 3px;
+  flex-shrink: 0;
 }
 .nav-icon svg {
   width: 100%;
@@ -844,16 +868,13 @@ onUnmounted(() => {
   display: block;
 }
 .nav-label {
-  font-family: Inter, 'PingFang SC', 'Microsoft YaHei', sans-serif;
-  font-size: 10px;
-  line-height: 13px;
+  font-family: Inter, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', SimHei, Arial, Helvetica, sans-serif;
+  font-size: 11px;
   color: var(--text-color);
-  opacity: 0.7;
-  white-space: nowrap;
-}
-.nav-item.active .nav-label {
-  opacity: 1;
-  font-weight: 600;
+  line-height: 13px;
+  max-width: 50px;
+  text-align: center;
+  overflow-wrap: anywhere;
 }
 
 .manage-panel {
