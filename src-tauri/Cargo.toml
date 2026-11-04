@@ -1,10 +1,17 @@
+[workspace]
+members = [
+    "crates/crystal-core",
+    "crates/crystal-bindgen",
+]
+resolver = "2"
+
 [package]
-name = "lumia-launcher"
-version = "1.0.0"
+name = "crystal-launcher"
+version = "1.1.0"
 edition = "2021"
 license = "MIT"
-description = "Lumia Launcher — a cross-platform Minecraft launcher built with Tauri 2, Rust and Vue 3"
-repository = "https://github.com/xtg44/Lumia-Launcher"
+description = "Crystal Launcher — a cross-platform Minecraft launcher built with Tauri 2, Rust and Vue 3"
+repository = "https://github.com/xtg44/Crystal-Launcher"
 
 [features]
 default = ["custom-protocol"]
@@ -41,6 +48,8 @@ base64 = "0.23.1"
 rand = "0.8"
 percent-encoding = "2"
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
+# 平台无关核心库：版本清单/下载/解密/登录等两端共用
+crystal-core = { path = "crates/crystal-core" }
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }

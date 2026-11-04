@@ -76,6 +76,8 @@ export async function launchGame(params: {
   username: string
   java_path?: string
   max_memory?: number
+  /** 界面语言（zh-CN / lzh / en-flip …），后端据此设置游戏内语言 */
+  locale?: string
 }): Promise<void> {
   return await invoke('launch_game', params)
 }
@@ -164,7 +166,7 @@ export async function saveBackgroundImage(base64Data: string, fileName: string):
   return await invoke('save_background_image', { base64Data, fileName })
 }
 
-/** 导入背景媒体（图片 / GIF / 视频）：传本机路径，后端复制进 Lumia 数据目录并返回新路径 */
+/** 导入背景媒体（图片 / GIF / 视频）：传本机路径，后端复制进应用数据目录并返回新路径 */
 export async function importBackgroundMedia(sourcePath: string): Promise<string> {
   return await invoke('import_background_media', { sourcePath })
 }
@@ -506,7 +508,7 @@ export interface PluginInfo {
   hasControls: boolean
 }
 
-/** 插件列表（扫描 plugins/ 目录，含 .lplugin 压缩包与解压文件夹） */
+/** 插件列表（扫描 plugins/ 目录，含 .cplugin 压缩包与解压文件夹） */
 export async function pluginList(): Promise<PluginInfo[]> {
   return await invoke('plugin_list')
 }
@@ -529,7 +531,8 @@ export interface PluginControlNode {
 }
 
 export interface PluginNotify {
-  kind: 'toast' | 'popup'
+  /** notify = 插件主动发的常驻提示，前端留得比 toast 久 */
+  kind: 'toast' | 'popup' | 'notify'
   text: string
 }
 
@@ -539,8 +542,14 @@ export interface PluginEventResult {
 }
 
 /** 触发插件控件事件（点击/切换等），返回执行后的控件树与通知 */
-export async function pluginUiEvent(id: string, control: string, event: string): Promise<PluginEventResult> {
-  return await invoke('plugin_ui_event', { id, control, event })
+export async function pluginUiEvent(
+  id: string,
+  control: string,
+  event: string,
+  /** 控件当前值（输入框内容），插件里用 `X.value` 读取 */
+  value?: string,
+): Promise<PluginEventResult> {
+  return await invoke('plugin_ui_event', { id, control, event, value })
 }
 
 export interface PageInjectEntry {
@@ -560,7 +569,7 @@ export async function pluginSetEnabled(id: string, enabled: boolean): Promise<vo
   return await invoke('plugin_set_enabled', { id, enabled })
 }
 
-/** 删除插件：移除注册表 + 解压目录 + 源 .lplugin 包 */
+/** 删除插件：移除注册表 + 解压目录 + 源 .cplugin 包 */
 export async function pluginDelete(id: string): Promise<void> {
   return await invoke('plugin_delete', { id })
 }
@@ -647,6 +656,8 @@ export interface UpdateCapability {
 }
 
 export interface UpdateCheckInfo {
+  /** 更新说明：按语言分组，或一整段字符串 */
+  notes?: string | Record<string, string>
   hasUpdate: boolean
   current: string
   latest: string

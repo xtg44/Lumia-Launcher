@@ -39,8 +39,8 @@ struct ButtonDef {
     green: bool,
 }
 
-/// LumiaTouchBarDelegate 的实例变量
-struct LumiaTouchBarIvars {
+/// CrystalTouchBarDelegate 的实例变量
+struct CrystalTouchBarIvars {
     buttons: Vec<ButtonDef>,
     progress_id: Retained<NSString>,
     progress: RefCell<Option<Retained<NSProgressIndicator>>>,
@@ -53,12 +53,12 @@ define_class!(
     /// 额外实现 btnClicked: 处理按钮点击（tag → 动作名 → 发送事件）。
     #[unsafe(super(NSObject))]
     #[thread_kind = MainThreadOnly]
-    #[ivars = LumiaTouchBarIvars]
-    struct LumiaTouchBarDelegate;
+    #[ivars = CrystalTouchBarIvars]
+    struct CrystalTouchBarDelegate;
 
-    unsafe impl NSObjectProtocol for LumiaTouchBarDelegate {}
+    unsafe impl NSObjectProtocol for CrystalTouchBarDelegate {}
 
-    unsafe impl NSTouchBarDelegate for LumiaTouchBarDelegate {
+    unsafe impl NSTouchBarDelegate for CrystalTouchBarDelegate {
         #[unsafe(method_id(touchBar:makeItemForIdentifier:))]
         #[allow(non_snake_case)]
         fn touchBar_makeItemForIdentifier(
@@ -71,7 +71,7 @@ define_class!(
         }
     }
 
-    impl LumiaTouchBarDelegate {
+    impl CrystalTouchBarDelegate {
         /// 按钮点击回调（target 是本代理，action 选择器 btnClicked:）
         #[unsafe(method(btnClicked:))]
         fn btn_clicked(&self, sender: Option<&AnyObject>) {
@@ -85,7 +85,7 @@ define_class!(
 );
 
 // 宏外辅助方法（可以自由使用早期 return）
-impl LumiaTouchBarDelegate {
+impl CrystalTouchBarDelegate {
     fn make_item(
         &self,
         identifier: &NSTouchBarItemIdentifier,
@@ -148,7 +148,7 @@ impl LumiaTouchBarDelegate {
 // 字段只用于 keep-alive（持有引用防止释放），本意就是不被读取
 #[allow(dead_code)]
 struct KeepAlive {
-    delegate: Retained<LumiaTouchBarDelegate>,
+    delegate: Retained<CrystalTouchBarDelegate>,
     touch_bar: Retained<NSTouchBar>,
 }
 // SAFETY: 两个字段只在主线程使用（见模块头注释）
@@ -211,8 +211,8 @@ pub fn setup(app: &AppHandle) -> Result<(), String> {
         })
         .collect();
 
-    let delegate: Retained<LumiaTouchBarDelegate> = {
-        let this = LumiaTouchBarDelegate::alloc(mtm).set_ivars(LumiaTouchBarIvars {
+    let delegate: Retained<CrystalTouchBarDelegate> = {
+        let this = CrystalTouchBarDelegate::alloc(mtm).set_ivars(CrystalTouchBarIvars {
             buttons,
             progress_id: NSString::from_str("com.lumia.touchbar.progress"),
             progress: RefCell::new(None),

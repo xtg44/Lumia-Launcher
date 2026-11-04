@@ -49,3 +49,7 @@ vscode-lumi/
 
 # 从 HMCL 抄录的参考源码（GPL，非本项目代码）
 tnl.java
+
+# 安卓调试包（构建产物，不进仓库）
+lumia-android-debug.apk
+*.apk

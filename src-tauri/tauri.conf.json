@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Lumia Launcher",
-  "version": "1.0.0",
-  "identifier": "com.xiaotiangua.lumia",
+  "productName": "Crystal Launcher",
+  "version": "1.1.0",
+  "identifier": "com.xiaotiangua.crystal",
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://127.0.0.1:1420",
@@ -14,7 +14,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "Lumia Launcher",
+        "title": "Crystal Launcher",
         "width": 900,
         "height": 600,
         "minWidth": 750,
@@ -24,10 +24,7 @@
         "fullscreen": false,
         "decorations": false,
         "transparent": true,
-        "shadow": false,
-        "windowEffects": {
-          "effects": ["blur"]
-        }
+        "shadow": false
       }
     ],
     "security": {
@@ -35,7 +32,7 @@
       "assetProtocol": {
         "enable": true,
         "scope": {
-          "allow": ["$DATA/Lumia/**"],
+          "allow": ["$DATA/Crystal/**", "$DATA/Lumia/**"],
           "requireLiteralLeadingDot": false
         }
       }

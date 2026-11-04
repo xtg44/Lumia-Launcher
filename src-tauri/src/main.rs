@@ -9,6 +9,7 @@ mod touchbar;
 mod updater;
 
 use auth::DeviceCodeState;
+use crystal_core::net::{ModSearchResult, url_encode};
 use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -122,8 +123,8 @@ pub struct AppConfig {
     /// 自动检查更新（启动时请求官方版本 API，发现新版本弹窗提示）
     #[serde(default = "default_true")]
     pub auto_update: bool,
-    /// 发现新版本后在后台静默下载（下载不影响使用，安装仍需用户确认）
-    #[serde(default = "default_true")]
+    /// 发现新版本后是否自动开始下载。默认关：先让用户看清更新内容，点「下载并安装」才下。
+    #[serde(default = "default_false")]
     pub auto_download_update: bool,
     /// 下载完成后自动退出并安装重启（默认关 —— 不打断正在游戏的用户）
     #[serde(default = "default_false")]
@@ -204,7 +205,7 @@ impl Default for AppConfig {
             ai_provider: "deepseek".to_string(),
             last_seen_version: String::new(),
             auto_update: true,
-            auto_download_update: true,
+            auto_download_update: false,
             auto_restart_update: false,
             java_args: String::new(),
             ever_launched_online: false,
@@ -228,36 +229,112 @@ pub struct AppState {
 static GAME_RUNNING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 // ========== 版本清单项 ==========
-#[derive(Serialize)]
-struct VersionManifestItem {
-    id: String,
-    #[serde(rename = "releaseTime")]
-    release_time: String,
-    category: String,
-}
+// 类型与解析逻辑已迁到 crates/lumia-core（接口注释见该 crate）。
+// 此处仅保留一个类型别名，供下方 get_versions 命令签名使用。
+use crystal_core::VersionManifestItem;
 
-// ========== 获取游戏目录 ==========
-// Lumia 专属游戏目录（各平台独立，游戏数据放在 Lumia 文件夹内的 .minecraft 子目录）：
-//   macOS:   ~/Library/Application Support/Lumia/.minecraft
-//   Windows: %APPDATA%\Lumia\.minecraft
-//   Linux:   ~/.local/share/Lumia/.minecraft
-fn default_game_dir() -> PathBuf {
+// ========== 品牌数据目录 ==========
+// v1.0 起产品名从 Lumia 改为 Crystal，数据目录随之改名。旧目录在启动时整体迁移，
+// 见 migrate_legacy_app_dir()。
+const APP_DIR_NAME: &str = "Crystal";
+/// 改名前的目录名。**只用于迁移**，不要用它做新的读写路径。
+const LEGACY_APP_DIR_NAME: &str = "Lumia";
+
+/// 应用数据根目录（跨平台，游戏目录与背景图/更新包都挂在它下面）：
+///   macOS:   ~/Library/Application Support/<name>
+///   Windows: %APPDATA%\<name>
+///   Linux:   ~/.local/share/<name>
+fn app_base_dir_for(name: &str) -> PathBuf {
     if cfg!(target_os = "macos") {
         if let Some(home) = std::env::var_os("HOME") {
-            return PathBuf::from(home).join("Library/Application Support/Lumia/.minecraft");
+            return PathBuf::from(home).join("Library/Application Support").join(name);
         }
     } else if cfg!(target_os = "linux") {
         if let Some(home) = std::env::var_os("HOME") {
-            return PathBuf::from(home).join(".local/share/Lumia/.minecraft");
+            return PathBuf::from(home).join(".local/share").join(name);
         }
     } else if let Some(appdata) = std::env::var_os("APPDATA") {
-        return PathBuf::from(appdata).join("Lumia/.minecraft");
+        return PathBuf::from(appdata).join(name);
     }
-    // 兜底
+    // 兜底：HOME 与 APPDATA 都没有时（极少见）退回用户目录下的隐藏文件夹
     if let Some(home) = std::env::var_os("HOME") {
-        return PathBuf::from(home).join(".lumia/.minecraft");
+        return PathBuf::from(home).join(format!(".{}", name.to_lowercase()));
     }
-    PathBuf::from("Lumia/.minecraft")
+    PathBuf::from(name)
+}
+
+/// 当前品牌的数据根目录
+fn app_base_dir() -> PathBuf {
+    app_base_dir_for(APP_DIR_NAME)
+}
+
+// ========== 获取游戏目录 ==========
+// Crystal 专属游戏目录（各平台独立，游戏数据放在 Crystal 文件夹内的 .minecraft 子目录）：
+//   macOS:   ~/Library/Application Support/Crystal/.minecraft
+//   Windows: %APPDATA%\Crystal\.minecraft
+//   Linux:   ~/.local/share/Crystal/.minecraft
+fn default_game_dir() -> PathBuf {
+    app_base_dir().join(".minecraft")
+}
+
+/// 递归复制目录。**只作为迁移的兜底路径**：符号链接按原样重建而不是跟随，
+/// 否则游戏目录里指向几 GB 库文件的链接会被展开成实体副本（甚至复制失败）。
+fn copy_dir_recursive(src: &Path, dst: &Path) -> std::io::Result<()> {
+    fs::create_dir_all(dst)?;
+    for entry in fs::read_dir(src)? {
+        let entry = entry?;
+        let ty = entry.file_type()?;
+        let to = dst.join(entry.file_name());
+        if ty.is_dir() {
+            copy_dir_recursive(&entry.path(), &to)?;
+        } else if ty.is_symlink() {
+            #[cfg(unix)]
+            {
+                let target = fs::read_link(entry.path())?;
+                let _ = std::os::unix::fs::symlink(target, &to);
+            }
+            #[cfg(not(unix))]
+            {
+                fs::copy(entry.path(), &to)?;
+            }
+        } else {
+            fs::copy(entry.path(), &to)?;
+        }
+    }
+    Ok(())
+}
+
+/// 一次性迁移：旧品牌目录 `Lumia` → 新目录 `Crystal`。
+///
+/// 两端都在同一个 appdata 根下，正常情况 `rename` 是同一文件系统的原子移动：
+/// 不复制、不占双份空间、不会出现「搬了一半」的中间状态。
+/// 只有 `rename` 失败（跨卷、Windows 上文件被占用等）才退化成递归复制；
+/// 复制失败时删掉半成品新目录，让下次启动还能重试，**旧目录永远不动**。
+fn migrate_legacy_app_dir() {
+    migrate_dir(app_base_dir_for(LEGACY_APP_DIR_NAME), app_base_dir());
+}
+
+/// migrate_legacy_app_dir 的实现体：把路径当参数传入，方便单测（不碰真实用户目录）。
+fn migrate_dir(old_dir: PathBuf, new_dir: PathBuf) {
+    if old_dir == new_dir || new_dir.exists() || !old_dir.exists() {
+        return;
+    }
+    if let Some(parent) = new_dir.parent() {
+        fs::create_dir_all(parent).unwrap_or_default();
+    }
+    match fs::rename(&old_dir, &new_dir) {
+        Ok(_) => eprintln!("已迁移数据目录: {:?} → {:?}", old_dir, new_dir),
+        Err(e) => {
+            eprintln!("数据目录重命名失败（{}），改用复制: {:?} → {:?}", e, old_dir, new_dir);
+            match copy_dir_recursive(&old_dir, &new_dir) {
+                Ok(_) => eprintln!("已复制旧数据到新目录；旧目录保留在 {:?} 作为备份", old_dir),
+                Err(e2) => {
+                    let _ = fs::remove_dir_all(&new_dir);
+                    eprintln!("迁移数据目录失败（旧目录保留，下次启动重试）: {}", e2);
+                }
+            }
+        }
+    }
 }
 
 async fn get_game_dir(app_handle: &tauri::AppHandle) -> PathBuf {
@@ -396,7 +473,7 @@ async fn retry_failed_assets(
 }
 
 // Minecraft 的版本 JSON 会用 rules 控制可选启动参数。例如 --demo 只应在
-// is_demo_user 为 true 时出现。Lumia 不启用试玩、快速启动或自定义分辨率功能，
+// is_demo_user 为 true 时出现。Crystal 不启用试玩、快速启动或自定义分辨率功能，
 // 因此这些 feature 均为 false。
 fn game_argument_allowed(rules: Option<&Vec<serde_json::Value>>) -> bool {
     let Some(rules) = rules else {
@@ -818,92 +895,7 @@ fn candidate_java_roots() -> Vec<PathBuf> {
 // ========== 1. 获取在线版本列表 ==========
 #[tauri::command]
 async fn get_versions() -> Result<Vec<VersionManifestItem>, String> {
-    let client = reqwest::Client::builder()
-        .user_agent("Lumia-Launcher/0.1")
-        .timeout(std::time::Duration::from_secs(15))
-        .build()
-        .map_err(|e| format!("创建网络客户端失败: {}", e))?;
-
-    let endpoints = [
-        "https://bmclapi2.bangbang93.com/mc/game/version_manifest_v2.json",
-        "https://launchermeta.mojang.com/mc/game/version_manifest_v2.json",
-    ];
-    let mut errors = Vec::new();
-
-    for endpoint in endpoints {
-        match client.get(endpoint).send().await {
-            Ok(response) if response.status().is_success() => match response.json().await {
-                Ok(json) => return parse_versions(json),
-                Err(error) => errors.push(format!("{}：解析响应失败: {}", endpoint, error)),
-            },
-            Ok(response) => errors.push(format!("{}：HTTP {}", endpoint, response.status())),
-            Err(error) => errors.push(format!("{}：{}", endpoint, error)),
-        }
-    }
-
-    Err(format!("获取版本列表失败：{}", errors.join("；")))
-}
-
-fn is_april_fool(id: &str) -> bool {
-    let april_fools = [
-        "20w14infinite",
-        "20w14∞",
-        "3D Shareware v1.34",
-        "oneblockatatime",
-        "15w14a",
-        "15w14b",
-        "1.RV-Pre1",
-        "1.RV-Pre2",
-        "1.RV-Pre3",
-        "22w13oneBlockAtATime",
-        "25w14craftmine",
-        "26w14a",
-    ];
-    april_fools.contains(&id) || id.contains("april") || id.contains("fool")
-}
-
-fn parse_versions(json: serde_json::Value) -> Result<Vec<VersionManifestItem>, String> {
-    let versions = json["versions"]
-        .as_array()
-        .ok_or("无效的响应格式")?
-        .iter()
-        .filter_map(|version| {
-            let id = version["id"].as_str()?;
-            if id.contains("experimental") || id.contains("pending") {
-                return None;
-            }
-
-            let version_type = version["type"].as_str().unwrap_or("unknown");
-            let category = match version_type {
-                "release" => "release",
-                "snapshot" => {
-                    if is_april_fool(id) {
-                        "april_fool"
-                    } else {
-                        "snapshot"
-                    }
-                }
-                "old_beta" | "old_alpha" => "ancient",
-                _ => {
-                    if is_april_fool(id) {
-                        "april_fool"
-                    } else if id.starts_with("b") || id.starts_with("a") || id.starts_with("indev") {
-                        "ancient"
-                    } else {
-                        "unknown"
-                    }
-                }
-            };
-
-            Some(VersionManifestItem {
-                id: id.to_string(),
-                release_time: version["releaseTime"].as_str().unwrap_or_default().to_string(),
-                category: category.to_string(),
-            })
-        })
-        .collect::<Vec<VersionManifestItem>>();
-
-    Ok(versions)
+    crystal_core::fetch_versions().await
 }
 
 // ========== 本地版本信息 ==========
@@ -3114,7 +3106,7 @@ async fn get_fabric_versions(version: String) -> Result<Vec<String>, String> {
     }
     
     let client = reqwest::Client::builder()
-        .user_agent("Lumia-Launcher/0.1")
+        .user_agent("Crystal-Launcher/0.1")
         .timeout(std::time::Duration::from_secs(15))
         .build()
         .map_err(|e| e.to_string())?;
@@ -3170,7 +3162,7 @@ async fn get_fabric_versions(version: String) -> Result<Vec<String>, String> {
 #[tauri::command]
 async fn get_forge_versions(version: String) -> Result<Vec<String>, String> {
     let client = reqwest::Client::builder()
-        .user_agent("Lumia-Launcher/0.1")
+        .user_agent("Crystal-Launcher/0.1")
         .timeout(std::time::Duration::from_secs(15))
         .build()
         .map_err(|e| e.to_string())?;
@@ -3238,7 +3230,7 @@ async fn get_neoforge_versions(version: String) -> Result<Vec<String>, String> {
     }
     
     let client = reqwest::Client::builder()
-        .user_agent("Lumia-Launcher/0.1")
+        .user_agent("Crystal-Launcher/0.1")
         .timeout(std::time::Duration::from_secs(15))
         .build()
         .map_err(|e| e.to_string())?;
@@ -3285,34 +3277,12 @@ async fn get_neoforge_versions(version: String) -> Result<Vec<String>, String> {
 
 // ========== 3.10 模组搜索 / 安装（Modrinth / CurseForge） ==========
 
-#[derive(serde::Serialize, Clone)]
-#[serde(rename_all = "camelCase")]
-struct ModSearchResult {
-    id: String,
-    name: String,
-    summary: String,
-    icon_url: String,
-    source: String,
-    loaders: Vec<String>,
-    game_versions: Vec<String>,
-    downloads: u64,
-    updated_at: String,
-}
-
-fn url_encode(s: &str) -> String {
-    let mut out = String::with_capacity(s.len() * 3);
-    for b in s.bytes() {
-        match b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => out.push(b as char),
-            _ => out.push_str(&format!("%{:02X}", b)),
-        }
-    }
-    out
-}
+// `ModSearchResult` 与 `url_encode` 定义已迁移到中央厨房 `crates/lumia-core::net`，
+// 上文 `use crystal_core::net::{ModSearchResult, url_encode};` 已导入，此处不再重复定义。
 
 fn modrinth_client() -> Result<reqwest::Client, String> {
     reqwest::Client::builder()
-        .user_agent("Lumia-Launcher/0.1 (Lumia Launcher; modrinth search)")
+        .user_agent("Crystal-Launcher/0.1 (Crystal Launcher; modrinth search)")
         .timeout(std::time::Duration::from_secs(20))
         .build()
         .map_err(|e| format!("创建网络客户端失败: {}", e))
@@ -3342,7 +3312,7 @@ async fn search_mods(
     }
 }
 
-/// 搜索 Modrinth 模组
+/// 搜索 Modrinth 模组（实现已迁移到中央厨房 `crystal_core::net`，此处转调）
 async fn search_modrinth_mods(
     client: &reqwest::Client,
     query: String,
@@ -3351,67 +3321,7 @@ async fn search_modrinth_mods(
     offset: u32,
     limit: u32,
 ) -> Result<Vec<ModSearchResult>, String> {
-    // facets：外层 OR、内层 AND；过滤模组类型 + 加载器 + MC 版本
-    let mut facets: Vec<Vec<String>> = vec![vec!["project_type:mod".to_string()]];
-    if !loader.is_empty() {
-        facets.push(vec![format!("categories:{}", loader)]);
-    }
-    if !mc_version.is_empty() {
-        facets.push(vec![format!("versions:{}", mc_version)]);
-    }
-
-    let facets_json = serde_json::to_string(&facets).unwrap_or_default();
-    let url = format!(
-        "https://api.modrinth.com/v2/search?query={}&facets={}&index=downloads&offset={}&limit={}",
-        url_encode(&query),
-        url_encode(&facets_json),
-        offset,
-        limit.min(100).max(1)
-    );
-
-    let resp = client
-        .get(&url)
-        .send()
-        .await
-        .map_err(|e| format!("Modrinth 搜索请求失败: {}", e))?;
-    if !resp.status().is_success() {
-        return Err(format!("Modrinth 搜索失败: HTTP {}", resp.status()));
-    }
-    let json: serde_json::Value = resp
-        .json()
-        .await
-        .map_err(|e| format!("解析搜索结果失败: {}", e))?;
-
-    let mut results = Vec::new();
-    if let Some(hits) = json["hits"].as_array() {
-        for hit in hits {
-            let loaders: Vec<String> = hit["categories"]
-                .as_array()
-                .map(|a| {
-                    a.iter()
-                        .filter_map(|v| v.as_str().map(String::from))
-                        .filter(|s| ["fabric", "forge", "neoforge", "quilt"].contains(&s.as_str()))
-                        .collect()
-                })
-                .unwrap_or_default();
-            let game_versions: Vec<String> = hit["versions"]
-                .as_array()
-                .map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect())
-                .unwrap_or_default();
-            results.push(ModSearchResult {
-                id: hit["project_id"].as_str().unwrap_or("").to_string(),
-                name: hit["title"].as_str().unwrap_or("").to_string(),
-                summary: hit["description"].as_str().unwrap_or("").to_string(),
-                icon_url: hit["icon_url"].as_str().unwrap_or("").to_string(),
-                source: "modrinth".to_string(),
-                loaders,
-                game_versions,
-                downloads: hit["downloads"].as_u64().unwrap_or(0),
-                updated_at: hit["date_modified"].as_str().unwrap_or("").to_string(),
-            });
-        }
-    }
-    Ok(results)
+    crystal_core::net::search_modrinth_mods(client, query, loader, mc_version, offset, limit).await
 }
 
 /// CurseForge 模组加载器类型 ID（api.curseforge.com 文档）
@@ -5590,7 +5500,7 @@ fn export_modpack_impl(
         "game": "minecraft",
         "versionId": version_name,
         "name": pack_name,
-        "summary": "Exported with Lumia Launcher",
+        "summary": "Exported with Crystal Launcher",
         "files": [],
         "dependencies": dependencies,
     });
@@ -6468,7 +6378,7 @@ async fn exec_web_search(client: &reqwest::Client, query: &str) -> Result<String
     );
     let search_json: serde_json::Value = client
         .get(&search_url)
-        .header("User-Agent", "LumiaLauncher/0.1 (Minecraft launcher; wiki assistant)")
+        .header("User-Agent", "CrystalLauncher/0.1 (Minecraft launcher; wiki assistant)")
         .send()
         .await
         .map_err(|e| format!("Wiki 搜索请求失败: {}", e))?
@@ -6496,7 +6406,7 @@ async fn exec_web_search(client: &reqwest::Client, query: &str) -> Result<String
     );
     let pages_json: serde_json::Value = client
         .get(&extract_url)
-        .header("User-Agent", "LumiaLauncher/0.1 (Minecraft launcher; wiki assistant)")
+        .header("User-Agent", "CrystalLauncher/0.1 (Minecraft launcher; wiki assistant)")
         .send()
         .await
         .map_err(|e| format!("Wiki 摘要请求失败: {}", e))?
@@ -6542,7 +6452,7 @@ async fn exec_web_search(client: &reqwest::Client, query: &str) -> Result<String
 async fn ai_wiki_context(query: &str) -> String {
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(10))
-        .user_agent("LumiaLauncher/0.1 (Minecraft launcher; wiki assistant)")
+        .user_agent("CrystalLauncher/0.1 (Minecraft launcher; wiki assistant)")
         .build()
         .unwrap_or_default();
     // 1. 搜索标题
@@ -6595,7 +6505,7 @@ async fn ai_wiki_context(query: &str) -> String {
 fn ai_system_prompt() -> String {
     let today = chrono::Local::now().format("%Y-%m-%d").to_string();
     format!(
-        "你是 Lumia Launcher 内置的 Minecraft 助手，知识主要来源于中文 Minecraft Wiki（https://zh.minecraft.wiki）。\n\
+        "你是 Crystal Launcher 内置的 Minecraft 助手，知识主要来源于中文 Minecraft Wiki（https://zh.minecraft.wiki）。\n\
          今天是 {today}。你的训练数据可能过时，凡涉及「最新版本、版本号、新增内容、更新日志、最新模组」等时效性信息，必须先调用 web_search 工具联网搜索中文 Minecraft Wiki，再依据搜索结果回答，不要仅凭旧知识作答。\n\
          规则：\n\
          1. 回答 Minecraft 相关问题，优先依据用户问题对应的 Wiki 参考资料或 web_search 搜索结果（若提供）。\n\
@@ -7622,12 +7532,70 @@ fn pid_has_visible_window(_pid: u32) -> bool {
     true
 }
 
+/// 启动器界面语言 → Minecraft 的 locale 代码（options.txt 里的 `lang:`）。
+///
+/// 返回 None 表示「认不出来，别动玩家的设置」。
+/// 文言和颠倒英语都不是我们编的梗，原版游戏里本来就有这两个语言：
+///   - `lzh`    文言（華夏），1.17.1 加入（1.15 的 19w34a 起快照里也有资源文件）
+///   - `en_ud`  ɥsᴉꞌƃuƎ (uʍoᗡ ǝpᴉsd∩)，颠倒英语，1.9.2 加入
+/// 更老的版本没有这两个语言包，游戏会自己退回英文，不必在启动器里判版本。
+fn mc_lang_code(locale: &str) -> Option<&'static str> {
+    Some(match locale {
+        "zh-CN" => "zh_cn",
+        "zh-TW" => "zh_tw",
+        "zh-HK" => "zh_hk",
+        "lzh" => "lzh",
+        "ja" => "ja_jp",
+        "ko" => "ko_kr",
+        "fr" => "fr_fr",
+        "en" => "en_us",
+        "en-flip" => "en_ud",
+        _ => return None,
+    })
+}
+
+/// 把 options.txt 里的 `lang` 改成指定语言，**其余设置一律原样保留**。
+///
+/// 只动 `lang:` 这一行：玩家的按键、画质、音量、难度都不能被启动器覆盖。
+/// 文件不存在或读不出来就静默跳过（交给调用方决定要不要新建）。
+/// 保留原文件的换行风格 —— Windows 上的 CRLF 不要被我们改成 LF。
+fn apply_options_lang(path: &Path, code: &str) {
+    let Ok(text) = fs::read_to_string(path) else {
+        return;
+    };
+    let crlf = text.contains("\r\n");
+    let mut replaced = false;
+    let mut lines: Vec<String> = text
+        .lines()
+        .map(|line| {
+            if line.starts_with("lang:") {
+                replaced = true;
+                format!("lang:{}", code)
+            } else {
+                line.to_string()
+            }
+        })
+        .collect();
+    if !replaced {
+        lines.push(format!("lang:{}", code));
+    }
+    let eol = if crlf { "\r\n" } else { "\n" };
+    let out = lines.join(eol) + eol;
+    if out != text {
+        if let Err(e) = fs::write(path, out) {
+            eprintln!("写入 options.txt 语言失败 {:?}: {}", path, e);
+        }
+    }
+}
+
 #[tauri::command]
 async fn launch_game(
     version: String,
     username: String,
     java_path: Option<String>,
     max_memory: Option<u32>,
+    // 当前界面语言（前端 resolveLocale 之后的结果）；缺省时退回配置文件里的偏好
+    locale: Option<String>,
     app_handle: tauri::AppHandle,
     window: Window,
 ) -> Result<(), String> {
@@ -7648,6 +7616,16 @@ async fn launch_game(
     let ip_region = ip_in_mainland_china().await;
     let mut config = state.config.lock().await;
     eprintln!("配置锁已获取");
+
+    // ===== 游戏内语言跟随界面语言 =====
+    // 前端传的是 resolveLocale 之后的真实语言（auto 也已解析），比配置文件里的 "auto" 更可信；
+    // 拿不到就退回配置偏好。两者都解析不出来时保持 zh_cn（历史行为）。
+    let ui_locale = locale
+        .as_deref()
+        .filter(|s| !s.is_empty())
+        .unwrap_or(config.language.as_str());
+    let mc_lang = mc_lang_code(ui_locale).unwrap_or("zh_cn");
+    eprintln!("界面语言 '{}' → 游戏内 lang:{}", ui_locale, mc_lang);
 
     // ===== 合规检查：离线模式仅限中国大陆 IP 或曾正版启动过（Mojang 许可条款） =====
     // 判定标准与下方认证参数一致：未登录正版（无 ms_uuid / ms_access_token）即为离线启动
@@ -7823,15 +7801,16 @@ async fn launch_game(
 
     // ===== 生成最小配置，强制 tutorialStep:none 跳过向导 =====
     // 注意：options.txt 是玩家的游戏设置（按键、画质、音量等）。
-    // 只在文件不存在时写入，否则每次启动都会把玩家的设置重置为默认值。
+    // 整份模板只在文件不存在时写入，否则每次启动都会把玩家的设置重置为默认值；
+    // 之后只按界面语言改 `lang:` 那一行（见下方 apply_options_lang）。
     let options_content = format!(
         r#"tutorialStep:none
 version:{}
-lang:zh_cn
-launcher_name:Lumia
+lang:{}
+launcher_name:Crystal
 launcher_version:0.1.0
 "#,
-        version_id
+        version_id, mc_lang
     );
 
     // 写入全局 options.txt（仅缺失时创建）
@@ -7849,6 +7828,10 @@ launcher_version:0.1.0
             eprintln!("写入版本 options.txt 失败: {}", e);
         }
     }
+
+    // 语言每次启动都对齐到界面语言（只改 lang 一行，其它设置原样保留）
+    apply_options_lang(&global_options_path, mc_lang);
+    apply_options_lang(&version_options_path, mc_lang);
 
     // ===== 调试日志 =====
     eprintln!("========== 启动调试信息 ==========");
@@ -8089,7 +8072,7 @@ launcher_version:0.1.0
                     .replace("${classpath}", &classpath)
                     .replace("${library_directory}", game_dir.join("libraries").to_str().unwrap_or(""))
                     .replace("${classpath_separator}", if cfg!(windows) { ";" } else { ":" })
-                    .replace("${launcher_name}", "Lumia")
+                    .replace("${launcher_name}", "Crystal")
                     .replace("${launcher_version}", "0.1.0");
                 if val.starts_with("-Xmx") {
                     has_xmx = true;
@@ -8127,7 +8110,7 @@ launcher_version:0.1.0
                                     .replace("${classpath}", &classpath)
                                     .replace("${library_directory}", game_dir.join("libraries").to_str().unwrap_or(""))
                                     .replace("${classpath_separator}", if cfg!(windows) { ";" } else { ":" })
-                                    .replace("${launcher_name}", "Lumia")
+                                    .replace("${launcher_name}", "Crystal")
                                     .replace("${launcher_version}", "0.1.0");
                                 jvm_args.push(val);
                             }
@@ -8136,7 +8119,7 @@ launcher_version:0.1.0
                         let val = vs
                             .replace("${natives_directory}", &java_library_path)
                             .replace("${classpath}", &classpath)
-                            .replace("${launcher_name}", "Lumia")
+                            .replace("${launcher_name}", "Crystal")
                             .replace("${launcher_version}", "0.1.0");
                         jvm_args.push(val);
                     }
@@ -8577,23 +8560,10 @@ async fn save_config(
 }
 
 // ========== 7.05 自定义背景图管理 ==========
-/// 返回 Lumia 数据目录（跨平台）
-fn lumia_data_dir() -> PathBuf {
-    #[cfg(target_os = "macos")]
-    {
-        let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
-        PathBuf::from(home).join("Library/Application Support/Lumia")
-    }
-    #[cfg(target_os = "windows")]
-    {
-        let appdata = std::env::var("APPDATA").unwrap_or_else(|_| ".".to_string());
-        PathBuf::from(appdata).join("Lumia")
-    }
-    #[cfg(target_os = "linux")]
-    {
-        let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
-        PathBuf::from(home).join(".local/share/Lumia")
-    }
+/// 返回应用数据目录（跨平台）——背景图、更新包、插件都放在这里。
+/// 与游戏目录共用 app_base_dir()，改名后只有目录名不同。
+fn app_data_dir() -> PathBuf {
+    app_base_dir()
 }
 
 /// 自定义背景允许的扩展名：静态图 / 动图（GIF、动态 WebP）/ 视频。
@@ -8607,7 +8577,8 @@ const BACKGROUND_MEDIA_EXT: &[&str] = &[
     "mp4", "m4v", "mov", "webm", "ogv", "mkv",
 ];
 
-/// 背景文件在 Lumia 数据目录中的固定前缀（带点，保持与历史版本一致）
+/// 背景文件在数据目录中的固定前缀。带点且沿用 lumia 前缀，
+/// 是为了让旧版本留下的背景文件在升级后仍能被 prune_background_media 清理掉。
 const BACKGROUND_MEDIA_STEM: &str = ".lumia_background";
 
 /// 清掉数据目录里所有历史背景文件（含无点前缀的旧命名）。
@@ -8630,7 +8601,7 @@ fn prune_background_media(dir: &Path) {
     }
 }
 
-/// 导入背景媒体：把用户选中的本地文件复制进 Lumia 数据目录，返回可直接给 asset:// 用的绝对路径。
+/// 导入背景媒体：把用户选中的本地文件复制进应用数据目录，返回可直接给 asset:// 用的绝对路径。
 ///
 /// 走「路径 → 复制」而不是 base64 IPC：视频动辄上百 MB，base64 会把内存膨胀 33%
 /// 并且整份塞进 IPC 消息里，必然卡死 webview。
@@ -8650,19 +8621,19 @@ async fn import_background_media(source_path: String) -> Result<String, String> 
         return Err(format!("不支持的背景文件类型：.{}", ext));
     }
 
-    let lumia_dir = lumia_data_dir();
-    fs::create_dir_all(&lumia_dir).map_err(|e| format!("创建目录失败: {}", e))?;
+    let data_dir = app_data_dir();
+    fs::create_dir_all(&data_dir).map_err(|e| format!("创建目录失败: {}", e))?;
 
     // 先清旧、再落新：避免新旧文件同时存在时读到过期的那份
-    prune_background_media(&lumia_dir);
+    prune_background_media(&data_dir);
 
-    let dest = lumia_dir.join(format!("{}.{}", BACKGROUND_MEDIA_STEM, ext));
+    let dest = data_dir.join(format!("{}.{}", BACKGROUND_MEDIA_STEM, ext));
     fs::copy(&src, &dest).map_err(|e| format!("复制文件失败: {}", e))?;
 
     Ok(dest.to_string_lossy().to_string())
 }
 
-/// 将 base64 图片解码并保存到 Lumia 数据目录，返回文件路径
+/// 将 base64 图片解码并保存到应用数据目录，返回文件路径
 #[tauri::command]
 async fn save_background_image(
     base64_data: String,
@@ -8673,16 +8644,16 @@ async fn save_background_image(
         .decode(&base64_data)
         .map_err(|e| format!("解码图片失败: {}", e))?;
 
-    let lumia_dir = lumia_data_dir();
-    fs::create_dir_all(&lumia_dir).map_err(|e| format!("创建目录失败: {}", e))?;
+    let data_dir = app_data_dir();
+    fs::create_dir_all(&data_dir).map_err(|e| format!("创建目录失败: {}", e))?;
 
     let ext = Path::new(&file_name)
         .extension()
         .and_then(|e| e.to_str())
         .unwrap_or("png");
-    prune_background_media(&lumia_dir);
+    prune_background_media(&data_dir);
     let filename = format!("{}.{}", BACKGROUND_MEDIA_STEM, ext);
-    let dest = lumia_dir.join(&filename);
+    let dest = data_dir.join(&filename);
 
     fs::write(&dest, &data).map_err(|e| format!("写入图片失败: {}", e))?;
 
@@ -8950,11 +8921,11 @@ async fn mark_changelog_seen(app_handle: tauri::AppHandle, version: String) -> R
     Ok(())
 }
 
-// ========== 7.3 自动检查更新（官方 API https://lumialauncher.cn/api.php?action=version） ==========
+// ========== 7.3 自动检查更新（官方 API https://crystallauncher.cn/api.php?action=version） ==========
 
 /// 与官方 API 同格式的当前版本标识（API 返回如 "v1.0"）。
 /// Cargo 版本 "1.0.0" 与 "v1.0" 是同一个版本，统一用它做比较基准。
-const CURRENT_VERSION_LABEL: &str = "v1.0";
+const CURRENT_VERSION_LABEL: &str = "v1.1";
 
 /// 版本阶段：alpha < beta < RC < 正式版。同一阶段再比阶段号。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -9048,6 +9019,10 @@ struct UpdateCheckResult {
     linux_download: Option<String>,
     /// 已按当前运行平台解析好的最终下载地址（前端直接用它）
     download_url: Option<String>,
+    /// 本次更新说明（官网接口的 `notes`）：
+    /// 既接受 `{"zh-CN": "...", "en": "..."}` 按语言给，也接受一整段字符串。
+    /// 原样转给前端，由前端按当前界面语言挑一条显示。
+    notes: Option<serde_json::Value>,
     /// 自更新包（服务端还没提供新字段时为 null → 前端退回「打开浏览器下载」）
     update_package: Option<updater::UpdatePackage>,
     /// 自更新能力：路径安全闸门 + 安装目录可写性
@@ -9060,13 +9035,13 @@ struct UpdateCheckResult {
 #[tauri::command]
 async fn check_for_updates() -> Result<UpdateCheckResult, String> {
     let client = reqwest::Client::builder()
-        .user_agent("Lumia-Launcher/1.0")
+        .user_agent("Crystal-Launcher/1.0")
         .timeout(std::time::Duration::from_secs(10))
         .build()
         .map_err(|e| format!("创建网络客户端失败: {}", e))?;
 
     let resp = client
-        .get("https://lumialauncher.cn/api.php?action=version")
+        .get("https://crystallauncher.cn/api.php?action=version")
         .send()
         .await
         .map_err(|e| format!("检查更新请求失败: {}", e))?;
@@ -9114,6 +9089,15 @@ async fn check_for_updates() -> Result<UpdateCheckResult, String> {
         .or_else(|| non_empty(&beta_download))
         .or_else(|| non_empty(&stable_download));
 
+    // 更新说明：`notes` 可以是「按语言分组的对象」或「一整段文本」，两种都原样透传
+    let notes = match &v["notes"] {
+        serde_json::Value::String(s) if !s.trim().is_empty() => {
+            Some(serde_json::Value::String(s.clone()))
+        }
+        serde_json::Value::Object(m) if !m.is_empty() => Some(serde_json::Value::Object(m.clone())),
+        _ => None,
+    };
+
     let current = CURRENT_VERSION_LABEL.to_string();
     // 支持 alpha / beta / RC / 正式版的先后关系（旧版只比数字，RC 会被误判为「没有新版本」）
     let has_update =
@@ -9135,6 +9119,7 @@ async fn check_for_updates() -> Result<UpdateCheckResult, String> {
         mac_download,
         linux_download,
         download_url,
+        notes,
         update_package,
         capability: updater::detect_capability(),
         last_apply_error: updater::take_last_error(),
@@ -9351,7 +9336,7 @@ async fn open_url(url: String) -> Result<(), String> {
 #[tauri::command]
 async fn start_device_auth(state: tauri::State<'_, AppState>) -> Result<auth::AuthResult, String> {
     let client = reqwest::Client::builder()
-        .user_agent("Lumia-Launcher/0.1")
+        .user_agent("Crystal-Launcher/0.1")
         .timeout(std::time::Duration::from_secs(15))
         .build()
         .map_err(|e| format!("创建网络客户端失败: {}", e))?;
@@ -9397,7 +9382,7 @@ async fn poll_device_auth(
     };
 
     let client = reqwest::Client::builder()
-        .user_agent("Lumia-Launcher/0.1")
+        .user_agent("Crystal-Launcher/0.1")
         .timeout(std::time::Duration::from_secs(15))
         .build()
         .map_err(|e| format!("创建网络客户端失败: {}", e))?;
@@ -9479,7 +9464,7 @@ async fn check_auth_status(state: tauri::State<'_, AppState>) -> Result<auth::Au
     match (refresh, name, uuid) {
         (Some(refresh), Some(name), Some(uuid)) => {
             let client = reqwest::Client::builder()
-                .user_agent("Lumia-Launcher/0.1")
+                .user_agent("Crystal-Launcher/0.1")
                 .timeout(std::time::Duration::from_secs(15))
                 .build()
                 .map_err(|e| format!("创建网络客户端失败: {}", e))?;
@@ -9595,7 +9580,11 @@ fn main() {
     // 清掉上次更新留下的残留（Windows 的 .old 文件与 helper 副本）
     updater::cleanup_leftovers();
 
-    // Lumia 专属游戏目录（mac/win/linux 各自独立，不与任何其他启动器共用）
+    // 品牌改名迁移：旧版数据在 ~/…/Lumia，新版在 ~/…/Crystal。
+    // 必须早于下面所有路径计算，否则第一启动会以为用户是全新安装、重新下载几 GB。
+    migrate_legacy_app_dir();
+
+    // Crystal 专属游戏目录（mac/win/linux 各自独立，不与任何其他启动器共用）
     let game_dir = default_game_dir();
 
     // 一次性迁移：旧版曾使用 ~/.minecraft，首次运行新目录时把旧数据整体搬过去，
@@ -9664,7 +9653,7 @@ fn main() {
                 };
                 if let Some(refresh) = refresh {
                     let client = match reqwest::Client::builder()
-                        .user_agent("Lumia-Launcher/0.1")
+                        .user_agent("Crystal-Launcher/0.1")
                         .timeout(std::time::Duration::from_secs(15))
                         .build()
                     {
@@ -9797,6 +9786,173 @@ mod tests {
         let d = home.join("terracotta").join(dir_name);
         fs::create_dir_all(&d).unwrap();
         fs::write(d.join("application.log"), content).unwrap();
+    }
+
+    // ===== 游戏内语言跟随界面语言 =====
+
+    #[test]
+    fn ui_locale_maps_to_minecraft_locale() {
+        assert_eq!(mc_lang_code("zh-CN"), Some("zh_cn"));
+        assert_eq!(mc_lang_code("zh-TW"), Some("zh_tw"));
+        assert_eq!(mc_lang_code("zh-HK"), Some("zh_hk"));
+        assert_eq!(mc_lang_code("en"), Some("en_us"));
+        assert_eq!(mc_lang_code("ja"), Some("ja_jp"));
+        assert_eq!(mc_lang_code("ko"), Some("ko_kr"));
+        assert_eq!(mc_lang_code("fr"), Some("fr_fr"));
+
+        // 原版游戏自带这两个语言，直接透传对应的 locale 代码
+        assert_eq!(mc_lang_code("lzh"), Some("lzh"));          // 文言（華夏）
+        assert_eq!(mc_lang_code("en-flip"), Some("en_ud"));    // 颠倒英语
+
+        // auto / 垃圾值都不该被当成已知语言（调用方会退回 zh_cn，不要瞎改玩家设置）
+        assert_eq!(mc_lang_code("auto"), None);
+        assert_eq!(mc_lang_code(""), None);
+        assert_eq!(mc_lang_code("klingon"), None);
+    }
+
+    #[test]
+    fn options_lang_replaces_existing_line_and_keeps_others() {
+        let root = std::env::temp_dir().join(format!("crystal-opt-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).unwrap();
+        let f = root.join("options.txt");
+        fs::write(
+            &f,
+            "tutorialStep:none\nlang:en_us\nfov:0.5\nguiScale:3\nautoJump:false\n",
+        )
+        .unwrap();
+
+        apply_options_lang(&f, "ja_jp");
+
+        let out = fs::read_to_string(&f).unwrap();
+        assert!(out.contains("lang:ja_jp"), "语言应被改成 ja_jp: {}", out);
+        assert!(!out.contains("lang:en_us"), "旧语言行应被替换而不是共存");
+        // 玩家自己的设置一个字都不能动
+        for keep in ["tutorialStep:none", "fov:0.5", "guiScale:3", "autoJump:false"] {
+            assert!(out.contains(keep), "{} 被弄丢了: {}", keep, out);
+        }
+        assert_eq!(out.lines().count(), 5, "行数不应增加");
+
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn options_lang_appends_when_missing_and_keeps_crlf() {
+        let root = std::env::temp_dir().join(format!("crystal-opt2-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).unwrap();
+        let f = root.join("options.txt");
+        // 没有 lang 行 + Windows 换行
+        fs::write(&f, "fov:0.5\r\nmouseSensitivity:0.5\r\n").unwrap();
+
+        apply_options_lang(&f, "fr_fr");
+
+        let out = fs::read_to_string(&f).unwrap();
+        assert!(out.contains("lang:fr_fr"), "缺 lang 行时应追加: {:?}", out);
+        assert!(out.contains("\r\n"), "CRLF 应保持，不要改成 LF: {:?}", out);
+        assert!(!out.replace("\r\n", "").contains('\n'), "不应混入裸 LF");
+
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn options_lang_is_noop_when_file_missing() {
+        let root = std::env::temp_dir().join(format!("crystal-opt3-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).unwrap();
+        let f = root.join("nope.txt");
+
+        apply_options_lang(&f, "ko_kr");
+
+        assert!(!f.exists(), "文件不存在时不应凭空创建");
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    // ===== 品牌目录迁移（Lumia → Crystal）=====
+
+    fn temp_migrate_root(tag: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("crystal-migrate-{}-{}", tag, std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    /// 正常情况：旧目录整体搬过去，内容一个不少，旧目录消失（rename 语义）
+    #[test]
+    fn migrate_renames_legacy_dir() {
+        let root = temp_migrate_root("rename");
+        let old = root.join(LEGACY_APP_DIR_NAME);
+        let new = root.join(APP_DIR_NAME);
+        fs::create_dir_all(old.join(".minecraft/versions/1.20.1")).unwrap();
+        fs::write(old.join(".minecraft/versions/1.20.1/1.20.1.json"), "{}").unwrap();
+        fs::write(old.join("lumia_config.json"), "{\"username\":\"xtg\"}").unwrap();
+
+        migrate_dir(old.clone(), new.clone());
+
+        assert!(!old.exists(), "旧目录应已被整体移走");
+        assert!(new.join(".minecraft/versions/1.20.1/1.20.1.json").is_file());
+        assert_eq!(
+            fs::read_to_string(new.join("lumia_config.json")).unwrap(),
+            "{\"username\":\"xtg\"}"
+        );
+
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// 新目录已经存在时绝不覆盖：用户可能已经在新目录里产生数据
+    #[test]
+    fn migrate_never_overwrites_existing_new_dir() {
+        let root = temp_migrate_root("keep");
+        let old = root.join(LEGACY_APP_DIR_NAME);
+        let new = root.join(APP_DIR_NAME);
+        fs::create_dir_all(old.join(".minecraft")).unwrap();
+        fs::write(old.join("marker-old"), "old").unwrap();
+        fs::create_dir_all(new.join(".minecraft")).unwrap();
+        fs::write(new.join("marker-new"), "new").unwrap();
+
+        migrate_dir(old.clone(), new.clone());
+
+        assert!(old.join("marker-old").is_file(), "旧目录必须原样保留");
+        assert!(new.join("marker-new").is_file(), "新目录不能被旧数据覆盖");
+        assert!(!new.join("marker-old").exists(), "不应把旧内容混进新目录");
+
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// 全新安装（两边都没有）时什么都不做，也不该凭空建目录
+    #[test]
+    fn migrate_noop_when_legacy_missing() {
+        let root = temp_migrate_root("noop");
+        let old = root.join(LEGACY_APP_DIR_NAME);
+        let new = root.join(APP_DIR_NAME);
+
+        migrate_dir(old.clone(), new.clone());
+
+        assert!(!old.exists());
+        assert!(!new.exists());
+
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// 兜底复制路径：符号链接按原样重建，不能跟随展开成实体副本
+    #[cfg(unix)]
+    #[test]
+    fn copy_dir_recursive_keeps_symlinks() {
+        let root = temp_migrate_root("symlink");
+        let src = root.join("src");
+        let dst = root.join("dst");
+        fs::create_dir_all(src.join("sub")).unwrap();
+        fs::write(src.join("sub/a.txt"), "a").unwrap();
+        std::os::unix::fs::symlink("sub/a.txt", src.join("link.txt")).unwrap();
+
+        copy_dir_recursive(&src, &dst).unwrap();
+
+        assert_eq!(fs::read_to_string(dst.join("sub/a.txt")).unwrap(), "a");
+        let meta = fs::symlink_metadata(dst.join("link.txt")).unwrap();
+        assert!(meta.file_type().is_symlink(), "符号链接必须仍是链接");
+        assert_eq!(fs::read_link(dst.join("link.txt")).unwrap().to_str(), Some("sub/a.txt"));
+
+        let _ = fs::remove_dir_all(&root);
     }
 
     #[test]

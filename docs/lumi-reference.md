@@ -1,12 +1,12 @@
 # Lumi 插件语言完整参考
 
-Lumi 是 Lumia Launcher 的插件语言。类 Python 缩进语法，事件驱动，零编程基础可读。
+Lumi 是 Crystal Launcher 的插件语言。类 Python 缩进语法，事件驱动，零编程基础可读。
 
 ---
 
 ## 1. 文件头（元信息）
 
-每个 `main.lumi` 文件必须以元信息开头，每行一个 `键: 值`：
+每个 `main.crystal` 文件必须以元信息开头，每行一个 `键: 值`：
 
 ```
 name: 插件名称
@@ -137,6 +137,34 @@ Btn = '准备就绪'     # 按钮文字变为"准备就绪"
 ---
 
 ## 5. 条件判断 `if`
+
+### 5.0 表达式与变量
+
+**字符串拼接** 用 `+`（数字会自动转文本）：
+
+```lumi
+set count = 3
+toast('共 ' + count + ' 个存档')
+```
+
+**变量** 用 `set 名字 = 表达式`，作用域是**整个插件**（跨事件保留，多个 `.crystal` 事件之间共享）：
+
+```lumi
+listen Btn.click:
+    set last = '备份完成'
+    toast(last)
+
+listen Other.click:
+    toast('上次：' + last)     # 另一个事件里也读得到
+```
+
+**取控件当前值** 用 `.value`（输入框内容、滑块位置）：
+
+```lumi
+NameInput = CreateInput('你的名字')
+listen NameInput.change:
+    toast('你好，' + NameInput.value)
+```
 
 ### 5.1 条件表达式
 
@@ -295,12 +323,34 @@ listen game_start(toast('游戏启动了！'))
 | `launchGame` | 启动当前版本游戏（P1 实现） | `launchGame` |
 | `sleep 秒数` | 等待 n 秒（支持小数） | `sleep 1.5` |
 
+### 8.2b 文本与文件内容（v1.1 新增）
+
+| 动作 | 说明 | 示例 |
+|------|------|------|
+| `writeFile 路径 内容` | 覆盖写入文本（自动建父目录） | `writeFile 'logs/a.txt' 'hello ' + name` |
+| `appendFile 路径 内容` | 追加写入 | `appendFile 'logs/a.txt' '又一行'` |
+| `readFile 路径` | 读取文本，结果用 toast 显示（超 300 字截断） | `readFile 'logs/a.txt'` |
+| `rename 旧 to 新` | 重命名 / 同盘移动 | `rename 'a.cfg' to 'backup/a.cfg'` |
+| `zip 源 to 目标` | 把文件或目录打包成 zip | `zip 'saves' to 'backup/saves.zip'` |
+| `unzip 源 to 目录` | 解压 zip（自动跳过含 `..` 的条目，防目录穿越） | `unzip 'backup/saves.zip' to 'saves'` |
+
+### 8.2c 系统（v1.1 新增）
+
+| 动作 | 说明 | 示例 |
+|------|------|------|
+| `copyText 文字` | 复制到系统剪贴板 | `copyText 'U/1234-5678-9012-3456'` |
+| `log 文字` | 追加到插件目录的 `plugin.log` | `log '开始备份'` |
+
 ### 8.3 通知
 
 | 动作 | 说明 | 示例 |
 |------|------|------|
 | `toast('文字')` | 右下角轻提示（3 秒自动消失） | `toast('备份完成')` |
 | `popup('文字')` | 弹窗对话框（用户点确定关闭） | `popup('操作成功！')` |
+| `notify('文字')` | 常驻提示（8 秒，比 toast 久，用于需要看清的长句） | `notify('备份完成：' + path)` |
+
+> `writeFile` / `toast` / `notify` / `copyText` 等接收文本的动作都支持表达式拼接，
+> 例如 `toast('共 ' + count + ' 个')`。
 
 ---
 
@@ -384,10 +434,10 @@ page home:
 ### 压缩包格式（推荐）
 
 ```
-my-plugin.lplugin        (zip 改后缀)
-├── main.lumi            （必需）
-├── icon.png             （可选，图标）
-└── ...                  （可选，图片等资源）
+my-plugin.cplugin      (zip 改后缀)
+├── main.crystal       （必需）
+├── icon.png           （可选，图标）
+└── ...                （可选，图片等资源）
 ```
 
 ### 文件夹格式
@@ -395,7 +445,7 @@ my-plugin.lplugin        (zip 改后缀)
 ```
 plugins/
 └── my-plugin/
-    ├── main.lumi
+    ├── main.crystal
     ├── icon.png
     └── ...
 ```
@@ -404,7 +454,7 @@ plugins/
 
 ```
 plugins/
-└── my-plugin.lumi       （单文件，无需子目录）
+└── my-plugin.crystal       （单文件，无需子目录）
 ```
 
 - 单文件因无资源/无图标，不能过插件市场审核，但**本地加载不拦截**。
@@ -412,7 +462,7 @@ plugins/
 
 ### 放入位置
 
-macOS: `~/Library/Application Support/Lumia/plugins/`
+macOS: `~/Library/Application Support/Crystal/plugins/`
 
 放入后，打开启动器 → 插件中心 → 点击「刷新」即可识别。
 
@@ -538,11 +588,20 @@ listen Btn.click(exists backup-folder, listFiles plugin-dir)
 - **语法高亮**：关键词、控件类型、字符串、注释
 - **自动补全**：`CreateButton` 等控件、动作词、内置名词、事件名
 - **诊断**：未知控件/动作/事件、缩进错误
-- **命令 `Lumi: 打包`**：当前文件夹一键打包为 `.lplugin`
+- **命令 `Lumi: 打包`**：当前文件夹一键打包为 `.cplugin`
 
 ---
 
 ## 16. 速查表
+
+### 语法速查
+
+| 写法 | 含义 |
+|------|------|
+| `set n = 表达式` | 定义/覆盖插件变量 |
+| `'a' + n + 'b'` | 字符串拼接（数字自动转文本） |
+| `X.value` | 控件的当前值（输入框内容 / 滑块位置） |
+| `X.selected` | 下拉列表当前选项 |
 
 ### 控件速查
 

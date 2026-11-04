@@ -27,16 +27,18 @@ function showNotify(n: PluginNotify) {
   if (n.kind === 'popup') {
     popup.value = n.text
   } else {
+    // toast 3 秒；notify 是插件主动发的常驻提示，留久一点
+    const ttl = n.kind === 'notify' ? 8000 : 3000
     toasts.value.push(n)
     setTimeout(() => {
       toasts.value = toasts.value.filter((x) => x !== n)
-    }, 3000)
+    }, ttl)
   }
 }
 
 /** 触发插件控件事件，刷新控件树并显示后端动作通知 */
 function fireEvent(control: string, event: string) {
-  pluginUiEvent(props.pluginId, control, event)
+  pluginUiEvent(props.pluginId, control, event, inputValues.value[control])
     .then((result) => {
       controls.value = result.tree
       result.notify.forEach((n) => showNotify(n))

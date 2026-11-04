@@ -4,6 +4,7 @@ import { getLocalVersions, launchGame, getConfig, saveConfig, listenLaunchStatus
 import { cleanSvg } from '../utils/svg'
 import { useAuth } from '../utils/auth'
 import { useI18n } from 'vue-i18n'
+import { currentLocale } from '../i18n'
 import { toast } from '../utils/toast'
 import CrashReport from './CrashReport.vue'
 import PluginInject from './PluginInject.vue'
@@ -140,6 +141,7 @@ async function handleLaunch() {
     await launchGame({
       version: selectedVersion.value,
       username: displayName.value.trim(),
+      locale: currentLocale(),
     })
   } catch (err: any) {
     toast(t('home.launchFailed', { msg: String(err) }), 'error')

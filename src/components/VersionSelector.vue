@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { currentLocale } from '../i18n'
 import { toast } from '../utils/toast'
 import { getLocalVersions, getConfig, launchGame, getIconUrl, listenLaunchStatus } from '../utils/tauri'
 import CrashReport from './CrashReport.vue'
@@ -111,7 +112,8 @@ async function handleLaunch(version: string) {
     console.log('调用 launchGame...')
     await launchGame({
       version,
-      username: config.username
+      username: config.username,
+      locale: currentLocale(),
     })
     console.log('launchGame 返回成功')
     toast(t('versionSelector.launchSuccess'), 'success')

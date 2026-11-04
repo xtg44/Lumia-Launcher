@@ -57,19 +57,19 @@ jobs:
       - name: List artifacts
         run: ls -lh src-tauri/target/release/bundle/deb/
 
-      # Tauri 产出的默认名是 "Lumia.Launcher_x.y.z_amd64.deb"，与 Windows/macOS 的命名规则不一致，
-      # 统一改成 Lumia-Launcher-<version>-Linux-x64.deb（与历史 Release 保持一致）
+      # Tauri 产出的默认名是 "Crystal.Launcher_x.y.z_amd64.deb"，与 Windows/macOS 的命名规则不一致，
+      # 统一改成 Crystal-Launcher-<version>-Linux-x64.deb（v1.0 及之前的 Release 仍是 Lumia- 前缀，属历史产物）
       - name: Normalize .deb name
         run: |
           VERSION=$(node -p "require('./package.json').version")
           mkdir -p dist-linux
-          cp src-tauri/target/release/bundle/deb/*.deb "dist-linux/Lumia-Launcher-${VERSION}-Linux-x64.deb"
+          cp src-tauri/target/release/bundle/deb/*.deb "dist-linux/Crystal-Launcher-${VERSION}-Linux-x64.deb"
           ls -lh dist-linux
 
       - name: Upload .deb
         uses: actions/upload-artifact@v4
         with:
-          name: lumia-linux-deb
+          name: crystal-linux-deb
           path: dist-linux/*.deb
           if-no-files-found: error
 

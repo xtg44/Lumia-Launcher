@@ -103,7 +103,7 @@ onMounted(load)
     <div v-if="loading" class="pc-loading">{{ t('pluginCenter.loading') }}</div>
     <div v-else-if="error" class="pc-error">{{ error }}</div>
 
-    <!-- 空状态：引导用户丢 .lplugin 进 plugins/ -->
+    <!-- 空状态：引导用户丢 .cplugin 进 plugins/ -->
     <div v-else-if="plugins.length === 0" class="pc-empty">
       <div class="pc-empty-title">{{ t('pluginCenter.noPlugins') }}</div>
       <div class="pc-empty-hint">{{ t('pluginCenter.emptyHint') }}</div>

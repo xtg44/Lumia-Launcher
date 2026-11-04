@@ -1,0 +1,12 @@
+com.crystal.android
+drawable crystal_logo
+drawable ic_nav_ai
+drawable ic_nav_download
+drawable ic_nav_home
+drawable ic_nav_music
+drawable ic_nav_plugin
+drawable ic_nav_settings
+drawable ic_nav_terracotta
+drawable ic_nav_version
+mipmap ic_launcher
+style Theme_Crystal

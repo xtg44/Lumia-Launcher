@@ -1,6 +1,6 @@
 // ============================================================================
-// Lumia 插件系统：.lplugin 扫描 / 解压 / 注册 / 命令
-// 插件 = zip 改后缀丢进 <app_data>/plugins/；内含 main.lumi（Lumi 语言主文件）+ 资源。
+// Crystal 插件系统：.cplugin 扫描 / 解压 / 注册 / 命令
+// 插件 = zip 改后缀丢进 <app_data>/plugins/；内含 main.crystal（打包主文件）+ 资源。
 // ============================================================================
 
 use crate::lumi;
@@ -11,10 +11,26 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
+/// 插件包后缀：v1.0 起为 `.cplugin`（zip 改后缀）。
+const PLUGIN_PKG_EXT: &str = "cplugin";
+/// 改名前的后缀。**继续识别**，否则升级后用户已装的插件会全部消失。
+const LEGACY_PKG_EXT: &str = "lplugin";
+
+/// 识别插件包文件名：`.cplugin` 与旧版 `.lplugin` 都算，返回 (插件 id, 是否新后缀)。
+fn plugin_pkg_id(path: &Path) -> Option<(String, bool)> {
+    let ext = path.extension()?.to_str()?;
+    let is_new = ext.eq_ignore_ascii_case(PLUGIN_PKG_EXT);
+    if !is_new && !ext.eq_ignore_ascii_case(LEGACY_PKG_EXT) {
+        return None;
+    }
+    let id = path.file_stem()?.to_str()?.to_string();
+    Some((id, is_new))
+}
+
 /// 一个已注册插件（Clone 只复制 Arc 指针，运行时内容共享）
 #[derive(Clone)]
 pub struct PluginEntry {
-    pub id: String,                   // 文件名（去 .lplugin 后缀）
+    pub id: String,                   // 文件名（去 .cplugin / .lplugin 后缀）
     pub dir: PathBuf,                 // 解压后的插件目录
     pub runtime: Arc<Mutex<lumi::PluginRuntime>>,
     pub enabled: bool,
@@ -40,7 +56,7 @@ fn plugins_root(app_handle: &tauri::AppHandle) -> PathBuf {
     app_handle
         .path()
         .app_data_dir()
-        .unwrap_or_else(|_| std::env::temp_dir().join("lumia"))
+        .unwrap_or_else(|_| std::env::temp_dir().join("crystal"))
         .join("plugins")
 }
 
@@ -51,28 +67,23 @@ pub async fn scan_plugins(app_handle: &tauri::AppHandle, reg: &Arc<Mutex<PluginR
     let root = plugins_root(app_handle);
     let _ = std::fs::create_dir_all(&root);
 
-    // 1. 无锁收集候选（三种形态：目录 / .lplugin 包 / 单文件 .lumi）
+    // 1. 无锁收集候选（三种形态：目录 / .cplugin 包 / 单文件 .crystal）
     let mut dir_candidates: Vec<(String, PathBuf)> = Vec::new();
-    let mut pkg_candidates: Vec<(String, PathBuf)> = Vec::new();
+    let mut pkg_candidates: Vec<(String, PathBuf, bool)> = Vec::new(); // (id, 路径, 是否新后缀)
     let mut file_candidates: Vec<(String, PathBuf)> = Vec::new();
     if let Ok(rd) = std::fs::read_dir(&root) {
         for e in rd.flatten() {
             let p = e.path();
             if p.is_dir() {
                 if let Some(id) = p.file_name().and_then(|n| n.to_str()) {
-                    if p.join("main.lumi").exists() {
+                    if p.join("main.crystal").exists() {
                         dir_candidates.push((id.to_string(), p));
                     }
                 }
-            } else if p.extension().and_then(|x| x.to_str()) == Some("lplugin") {
-                let id = p
-                    .file_stem()
-                    .and_then(|n| n.to_str())
-                    .unwrap_or("plugin")
-                    .to_string();
-                pkg_candidates.push((id, p));
-            } else if p.extension().and_then(|x| x.to_str()) == Some("lumi") {
-                // 单文件插件：一个 .lumi 即插件本体（无资源，图标默认 plugin.svg）
+            } else if let Some((id, is_new)) = plugin_pkg_id(&p) {
+                pkg_candidates.push((id, p, is_new));
+            } else if p.extension().and_then(|x| x.to_str()) == Some("crystal") {
+                // 单文件插件：一个 .crystal 即插件本体（无资源，图标默认 plugin.svg）
                 let id = p
                     .file_stem()
                     .and_then(|n| n.to_str())
@@ -82,6 +93,9 @@ pub async fn scan_plugins(app_handle: &tauri::AppHandle, reg: &Arc<Mutex<PluginR
             }
         }
     }
+
+    // 同一 id 新旧后缀并存时优先 `.cplugin`：排序让它先加载，后面的同名包会被 seen 跳过
+    pkg_candidates.sort_by(|a, b| b.2.cmp(&a.2).then_with(|| a.0.cmp(&b.0)));
 
     let mut seen: Vec<String> = Vec::new();
 
@@ -98,13 +112,13 @@ pub async fn scan_plugins(app_handle: &tauri::AppHandle, reg: &Arc<Mutex<PluginR
         }
     }
 
-    // 3. .lplugin 压缩包（解压后加载）
-    for (id, pkg) in pkg_candidates {
+    // 3. .cplugin 压缩包（解压后加载；旧后缀 .lplugin 走同一条路）
+    for (id, pkg, _) in pkg_candidates {
         if reg.lock().unwrap().plugins.contains_key(&id) || seen.contains(&id) {
             continue;
         }
         let target = root.join(&id);
-        if extract_plugin(&pkg, &target).is_ok() && target.join("main.lumi").exists() {
+        if extract_plugin(&pkg, &target).is_ok() && target.join("main.crystal").exists() {
             match load_plugin_dir(app_handle, reg, &target, id.clone(), false) {
                 Ok(()) => seen.push(id.clone()),
                 Err(err) => eprintln!("[插件] 加载失败 {}: {}", id, err),
@@ -112,7 +126,7 @@ pub async fn scan_plugins(app_handle: &tauri::AppHandle, reg: &Arc<Mutex<PluginR
         }
     }
 
-    // 4. 单文件 .lumi（无资源也可正常解析；单文件形态过不了市场审核，但本地加载不拦）
+    // 4. 单文件 .crystal（无资源也可正常解析；单文件形态过不了市场审核，但本地加载不拦）
     for (id, file) in file_candidates {
         if reg.lock().unwrap().plugins.contains_key(&id) || seen.contains(&id) {
             continue;
@@ -125,7 +139,7 @@ pub async fn scan_plugins(app_handle: &tauri::AppHandle, reg: &Arc<Mutex<PluginR
 }
 
 
-/// 解压 .lplugin（zip）到目标目录
+/// 解压插件包（zip）到目标目录
 fn extract_plugin(zip_path: &Path, target: &Path) -> Result<(), String> {
     let file = std::fs::File::open(zip_path).map_err(|e| format!("打开插件包失败: {}", e))?;
     let mut archive =
@@ -175,7 +189,7 @@ fn register_entry(reg: &Arc<Mutex<PluginRegistry>>, entry: PluginEntry) {
     log_plugins_line(&format!("已加载插件 {}", id));
 }
 
-/// 从目录加载一个插件（含 main.lumi）
+/// 从目录加载一个插件（含 main.crystal）
 fn load_plugin_dir(
     _app_handle: &tauri::AppHandle,
     reg: &Arc<Mutex<PluginRegistry>>,
@@ -183,9 +197,9 @@ fn load_plugin_dir(
     id: String,
     builtin: bool,
 ) -> Result<(), String> {
-    let main_path = dir.join("main.lumi");
+    let main_path = dir.join("main.crystal");
     let src = std::fs::read_to_string(&main_path)
-        .map_err(|e| format!("读取 main.lumi 失败: {}", e))?;
+        .map_err(|e| format!("读取 main.crystal 失败: {}", e))?;
     let runtime = lumi::build_runtime(&src, dir.to_path_buf())
         .map_err(|e| format!("Lumi 解析失败: {}", e))?;
     let manifest = manifest_json(&runtime);
@@ -201,7 +215,7 @@ fn load_plugin_dir(
     Ok(())
 }
 
-/// 从单文件加载一个插件（`plugins/xxx.lumi`，无任何资源文件）。
+/// 从单文件加载一个插件（`plugins/xxx.crystal`，无任何资源文件）。
 /// 单文件形态可正常解析运行（图标缺省时前端默认 plugin.svg）；
 /// 因无资源/无图标，过不了插件市场审核，但本地加载不拦。
 fn load_plugin_file(
@@ -357,6 +371,8 @@ pub async fn plugin_ui_event(
     id: String,
     control: String,
     event: String,
+    // 控件的当前值（输入框内容 / 滑块位置），供插件里的 `X.value` 读取
+    value: Option<String>,
     reg_state: tauri::State<'_, PluginRegistryState>,
 ) -> Result<serde_json::Value, String> {
     let reg = reg_state.0.clone();
@@ -372,6 +388,7 @@ pub async fn plugin_ui_event(
         &rt,
         &lumi::ListenerTarget::Control(control),
         &event,
+        value,
     )
     .await?;
     Ok(json!({ "notify": notify, "tree": tree }))
@@ -398,6 +415,7 @@ pub async fn plugin_emit_event(
             &e.runtime,
             &lumi::ListenerTarget::System(event.clone()),
             "",
+            None,
         )
         .await?;
         notify.append(&mut n);
@@ -422,7 +440,7 @@ pub fn plugin_set_enabled(
     Ok(())
 }
 
-/// 删除插件：从注册表移除，并删除解压目录 + 源 .lplugin 包（如有）
+/// 删除插件：从注册表移除，并删除解压目录 + 源插件包（新旧后缀都清）
 #[tauri::command]
 pub fn plugin_delete(
     id: String,
@@ -445,10 +463,12 @@ pub fn plugin_delete(
     if dir.exists() {
         std::fs::remove_dir_all(&dir).map_err(|e| format!("删除插件目录失败: {}", e))?;
     }
-    // 删除源 .lplugin 包
-    let pkg = root.join(format!("{}.lplugin", id));
-    if pkg.exists() {
-        std::fs::remove_file(&pkg).map_err(|e| format!("删除插件包失败: {}", e))?;
+    // 删除源插件包（用户目录里可能同时留着新旧后缀）
+    for ext in [PLUGIN_PKG_EXT, LEGACY_PKG_EXT] {
+        let pkg = root.join(format!("{}.{}", id, ext));
+        if pkg.exists() {
+            std::fs::remove_file(&pkg).map_err(|e| format!("删除插件包失败: {}", e))?;
+        }
     }
     Ok(())
 }
@@ -485,20 +505,21 @@ mod tests {
         dir
     }
 
-    /// 构造一个 zip 格式 .lplugin 并解压（走真实 extract_plugin 路径），验证 .lplugin 形态可被加载
-    fn write_and_extract_lplugin(dir: &Path) {
-        let root = temp_root("zlp");
-        let pkg = root.join("test.lplugin");
+    /// 构造一个 zip 插件包并解压（走真实 extract_plugin 路径）。
+    /// 解压本身与后缀无关，所以顺带用它验证新旧后缀都能走通。
+    fn write_and_extract_package(dir: &Path, ext: &str) {
+        let root = temp_root(&format!("zlp-{}", ext));
+        let pkg = root.join(format!("test.{}", ext));
         {
             let file = std::fs::File::create(&pkg).unwrap();
             let mut zip = zip::ZipWriter::new(file);
-            zip.start_file("main.lumi", zip::write::FileOptions::default()).unwrap();
+            zip.start_file("main.crystal", zip::write::FileOptions::default()).unwrap();
             let src = "name: Test Plugin\nGo = CreateButton('Go')\nlisten Go.click(Go = 'Done')\n";
             std::io::Write::write_all(&mut zip, src.as_bytes()).unwrap();
             zip.finish().unwrap();
         }
-        extract_plugin(&pkg, dir).expect("extract .lplugin");
-        assert!(dir.join("main.lumi").exists(), ".lplugin 解压后 main.lumi 应存在");
+        extract_plugin(&pkg, dir).expect("extract plugin package");
+        assert!(dir.join("main.crystal").exists(), "插件包解压后 main.crystal 应存在");
         let _ = std::fs::remove_dir_all(&root);
     }
 
@@ -516,7 +537,7 @@ listen Backup_Button.click:
         let root = temp_root("dispatch");
         let dir = root.join("autosave");
         std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(dir.join("main.lumi"), src).unwrap();
+        std::fs::write(dir.join("main.crystal"), src).unwrap();
         let reg = Arc::new(Mutex::new(PluginRegistry::new()));
         // 直接构造运行时并注册（避开 tauri AppHandle 依赖）
         let runtime = lumi::build_runtime(src, dir.clone()).expect("build_runtime");
@@ -539,6 +560,7 @@ listen Backup_Button.click:
                 &entry.runtime,
                 &lumi::ListenerTarget::Control("Backup_Button".to_string()),
                 "click",
+                None,
             ))
             .expect("dispatch");
         // 后端动作 toast('备份完成') 生效
@@ -558,23 +580,46 @@ listen Backup_Button.click:
         let _ = std::fs::remove_dir_all(&root);
     }
 
+    /// 插件包后缀识别：新后缀与旧后缀都要认，其他文件不认
     #[test]
-    fn extract_lplugin_zip_roundtrip() {
-        let target = temp_root("roundtrip");
-        write_and_extract_lplugin(&target);
-        let src = std::fs::read_to_string(target.join("main.lumi")).unwrap();
-        let rt = lumi::build_runtime(&src, target.clone()).expect("Lumi 解析失败");
-        assert_eq!(rt.meta.name, "Test Plugin");
-        assert!(rt.controls.iter().any(|c| c.name == "Go" && c.ctype == "button"));
-        let _ = std::fs::remove_dir_all(&target);
+    fn plugin_package_extension_detection() {
+        let new = plugin_pkg_id(Path::new("/plugins/autosave.cplugin"));
+        assert_eq!(new, Some(("autosave".to_string(), true)));
+
+        // 旧后缀仍必须被识别，否则升级后老插件全丢
+        let old = plugin_pkg_id(Path::new("/plugins/autosave.lplugin"));
+        assert_eq!(old, Some(("autosave".to_string(), false)));
+
+        // 大小写不敏感（macOS/Windows 上用户手改扩展名很常见）
+        assert_eq!(plugin_pkg_id(Path::new("/plugins/a.CPLUGIN")), Some(("a".to_string(), true)));
+        assert_eq!(plugin_pkg_id(Path::new("/plugins/a.LPlugin")), Some(("a".to_string(), false)));
+
+        // 单文件插件与无关文件不算插件包
+        assert_eq!(plugin_pkg_id(Path::new("/plugins/main.crystal")), None);
+        assert_eq!(plugin_pkg_id(Path::new("/plugins/readme.txt")), None);
+        assert_eq!(plugin_pkg_id(Path::new("/plugins/noext")), None);
+    }
+
+    #[test]
+    fn extract_plugin_zip_roundtrip() {
+        // 新旧后缀走同一条解压路径，两边都要能跑通
+        for ext in ["cplugin", "lplugin"] {
+            let target = temp_root(&format!("roundtrip-{}", ext));
+            write_and_extract_package(&target, ext);
+            let src = std::fs::read_to_string(target.join("main.crystal")).unwrap();
+            let rt = lumi::build_runtime(&src, target.clone()).expect("Lumi 解析失败");
+            assert_eq!(rt.meta.name, "Test Plugin", "{} 包解析出的元信息不对", ext);
+            assert!(rt.controls.iter().any(|c| c.name == "Go" && c.ctype == "button"));
+            let _ = std::fs::remove_dir_all(&target);
+        }
     }
 
     #[test]
     fn single_file_plugin_loads() {
-        // 单文件形态：plugins/xxx.lumi 直接丢入（无任何资源）也能正常解析注册
+        // 单文件形态：plugins/xxx.crystal 直接丢入（无任何资源）也能正常解析注册
         let root = temp_root("single-file");
         let _ = std::fs::create_dir_all(&root);
-        let file = root.join("hello.lumi");
+        let file = root.join("hello.crystal");
         std::fs::write(
             &file,
             "name: Hello\nversion: 1.0\nNote = CreateText('hi')\nlisten Note.click:\n    Note = '点过'\n",

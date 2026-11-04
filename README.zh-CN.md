@@ -1,8 +1,8 @@
 <div align="center">
 
-<img src="icon.png" width="110" alt="Lumia Launcher" />
+<img src="icon.png" width="110" alt="Crystal Launcher" />
 
-# Lumia Launcher
+# Crystal Launcher
 
 **跨平台 Minecraft 启动器** · Tauri 2 + Rust + Vue 3
 
@@ -13,7 +13,7 @@
 [![Rust](https://img.shields.io/badge/Rust-stable-000000?style=flat-square&logo=rust&logoColor=white)](https://www.rust-lang.org/)
 [![License](https://img.shields.io/badge/license-MIT-3DA639?style=flat-square)](LICENSE)
 
-[官网](https://lumialauncher.cn) · [下载](https://lumialauncher.cn) · [插件语言文档](docs/lumi-reference.md) · [插件系统设计](docs/插件系统设计.md)
+[官网](https://crystallauncher.cn) · [下载](https://crystallauncher.cn) · [插件语言文档](docs/lumi-reference.md) · [插件系统设计](docs/插件系统设计.md)
 
 [English](README.md) · **简体中文**
 
@@ -23,7 +23,7 @@
 
 ## 简介
 
-Lumia Launcher 是一个用 **Rust + Tauri 2** 构建的轻量跨平台 Minecraft 启动器，界面使用 **Vue 3 + TypeScript**。
+Crystal Launcher 是一个用 **Rust + Tauri 2** 构建的轻量跨平台 Minecraft 启动器，界面使用 **Vue 3 + TypeScript**。
 
 安装包体积小、启动快，内置完整的版本管理与资源下载能力，并提供一套自研插件语言 **Lumi**，让零编程基础的用户也能给启动器写扩展。
 
@@ -51,11 +51,11 @@ Lumia Launcher 是一个用 **Rust + Tauri 2** 构建的轻量跨平台 Minecraf
 - 内置**音乐播放器**与常驻播放条
 - 内置 **AI 助手**面板
 - **深色主题**，界面简洁扁平
-- **7 种界面语言**：简体中文 / 繁體中文（中国台湾 / 中国香港）/ English / 日本語 / 한국어 / Français
+- **9 种界面语言**：简体中文 / 繁體中文（中国台湾 / 中国香港）/ 文言（華夏） / English / 颠倒英文（彩蛋）/ 日本語 / 한국어 / Français
 
 ### 🧩 插件系统（Lumi）
 - 自研 **Lumi 插件语言**：类 Python 缩进语法、极简英文关键词，**零编程基础可读**
-- `.lplugin` 插件包 = zip 改后缀，可含脚本与资源文件
+- `.cplugin` 插件包 = zip 改后缀，可含脚本与资源文件
 - 事件驱动模型（`listen 控件.事件`），UI 由脚本解释出的控件树驱动
 - 支持压缩包 / 文件夹 / 单文件三种安装形态
 - 详见 [Lumi 语言完整参考](docs/lumi-reference.md) 与 [插件系统设计](docs/插件系统设计.md)
@@ -66,7 +66,7 @@ Lumia Launcher 是一个用 **Rust + Tauri 2** 构建的轻量跨平台 Minecraf
 
 ## 下载安装
 
-前往官网 **[lumialauncher.cn](https://lumialauncher.cn)**，页面会自动识别你的平台并给出对应安装包；各平台安装包也会同步发布到 [GitHub Releases](https://github.com/xtg44/Lumia-Launcher/releases)：
+前往官网 **[crystallauncher.cn](https://crystallauncher.cn)**，页面会自动识别你的平台并给出对应安装包；各平台安装包也会同步发布到 [GitHub Releases](https://github.com/xtg44/Crystal-Launcher/releases)：
 
 | 平台 | 安装包 |
 |---|---|
@@ -104,10 +104,10 @@ Rust 后端模块划分：
 ## 项目结构
 
 ```
-Lumia Launcher/
+Crystal Launcher/
 ├── src/                  # Vue 3 前端
 │   ├── components/       # 24 个视图与组件
-│   ├── i18n/             # 7 种语言
+│   ├── i18n/             # 9 种语言
 │   ├── utils/            # tauri.ts 统一封装 invoke、svg.ts 等
 │   └── App.vue
 ├── src-tauri/            # Rust 后端
@@ -131,8 +131,8 @@ Lumia Launcher/
 ### 启动
 
 ```bash
-git clone https://github.com/xtg44/Lumia-Launcher.git
-cd Lumia-Launcher
+git clone https://github.com/xtg44/Crystal-Launcher.git
+cd Crystal-Launcher
 npm install
 npm run tauri dev        # 启动开发窗口（前端热重载）
 ```
@@ -171,7 +171,7 @@ npm run tauri build -- --target universal-apple-darwin # 通用包
 ## 许可证
 本项目采用 **MIT License** 发布，完整条款见 [LICENSE](LICENSE)。
 
-Copyright (c) 2026 Lumia
+Copyright (c) 2026 Crystal
 
 你可以自由使用、修改、分发本项目，包括商业用途，只需保留版权声明与许可声明。
 

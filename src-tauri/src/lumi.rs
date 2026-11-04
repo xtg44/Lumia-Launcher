@@ -1,5 +1,5 @@
 // ============================================================================
-// Lumi —— Lumia 插件语言（作者定稿语法）
+// Lumi —— Crystal 插件语言（作者定稿语法）
 // 类 Python 缩进式 + 单行括号表达式；事件驱动（listen 控件.事件 / listen 系统事件）；
 // 无函数定义、无变量类型、无复杂控制流；动作库白名单即安全边界。
 // ============================================================================
@@ -28,6 +28,7 @@ enum Tok {
     Dot,      // .
     DotDot,   // ..
     Comma,    // ,
+    Plus,     // +
 }
 
 #[derive(Debug, Clone)]
@@ -94,6 +95,10 @@ fn tokenize(src: &str) -> Result<Vec<LineToks>, String> {
                 }
                 ',' => {
                     toks.push(Tok::Comma);
+                    i += 1;
+                }
+                '+' => {
+                    toks.push(Tok::Plus);
                     i += 1;
                 }
                 '\'' | '"' => {
@@ -173,6 +178,10 @@ pub enum Expr {
     Num(f64),
     ControlText(String),
     Selected(String),
+    /// 控件的当前值（输入框内容 / 滑块位置），`X.value`
+    Value(String),
+    /// 字符串拼接（`'共 ' + count + ' 个'`）；数字会自动转成文本
+    Concat(Box<Expr>, Box<Expr>),
 }
 
 #[derive(Debug, Clone)]
@@ -197,13 +206,24 @@ pub enum Action {
     Move(String, String),
     Delete(String),
     Open(String),
-    Popup(String),
-    Toast(String),
+    Popup(Expr),
+    Toast(Expr),
     Sleep(f64),
     LaunchGame,
     Mkdir(String),       // mkdir 路径 —— 创建目录（可多级）
     Exists(String),      // exists 路径 —— 判断存在，用 toast 反馈
     ListFiles(String),   // listFiles 路径 —— 列出目录内容，用 toast 反馈
+
+    // ---- v1.1 起新增 ----
+    WriteFile(String, Expr),      // writeFile 路径 内容 —— 覆盖写入（自动建父目录）
+    AppendFile(String, Expr),     // appendFile 路径 内容 —— 追加
+    ReadFile(String),             // readFile 路径 —— 读文本，结果用 toast 反馈（超长截断）
+    Rename(String, String),       // rename 旧 to 新 —— 重命名/同盘移动单个文件
+    CopyText(Expr),               // copyText 文字 —— 复制到系统剪贴板
+    Log(Expr),                    // log 文字 —— 追加到插件目录的 plugin.log
+    Zip(String, String),          // zip 源 to 目标.zip
+    Unzip(String, String),        // unzip 源.zip to 目标目录
+    Notify(Expr),                 // notify 文字 —— 常驻提示（比 toast 久）
 }
 
 #[derive(Debug, Clone)]
@@ -224,6 +244,8 @@ pub enum Stmt {
     For(String, IterExpr, Vec<Stmt>),
     Break,
     Action(Action),
+    /// `set 名字 = 表达式` —— 写进插件自己的变量表（跨事件保留）
+    SetVar(String, Expr),
     Page(String, Vec<Stmt>),
 }
 
@@ -502,15 +524,46 @@ impl Parser {
         }
     }
 
+    /// 表达式 = 若干个原子用 `+` 连起来（左结合）。`+` 只做字符串拼接。
     fn expr_from_toks(&self, toks: &[Tok]) -> Result<Expr, String> {
-        let t = toks.first().ok_or_else(|| self.err("表达式为空"))?;
+        if toks.is_empty() {
+            return Err(self.err("表达式为空"));
+        }
+        let mut parts: Vec<&[Tok]> = Vec::new();
+        let mut start = 0usize;
+        for (i, t) in toks.iter().enumerate() {
+            if *t == Tok::Plus {
+                parts.push(&toks[start..i]);
+                start = i + 1;
+            }
+        }
+        parts.push(&toks[start..]);
+        let mut out: Option<Expr> = None;
+        for part in parts {
+            let atom = self.atom_from_toks(part)?;
+            out = Some(match out {
+                None => atom,
+                Some(prev) => Expr::Concat(Box::new(prev), Box::new(atom)),
+            });
+        }
+        out.ok_or_else(|| self.err("表达式为空"))
+    }
+
+    fn atom_from_toks(&self, toks: &[Tok]) -> Result<Expr, String> {
+        let t = toks.first().ok_or_else(|| self.err("+ 两侧都要有内容"))?;
         match t {
             Tok::Str(s) => Ok(Expr::Str(s.clone())),
             Tok::Num(n) => Ok(Expr::Num(n.parse().unwrap_or(0.0))),
             Tok::Ident(name) => {
                 if toks.len() >= 3 && matches!(toks.get(1), Some(Tok::Dot)) {
-                    if matches!(toks.get(2), Some(Tok::Ident(s)) if s == "selected") {
-                        return Ok(Expr::Selected(name.clone()));
+                    match toks.get(2) {
+                        Some(Tok::Ident(s)) if s == "selected" => {
+                            return Ok(Expr::Selected(name.clone()))
+                        }
+                        Some(Tok::Ident(s)) if s == "value" => {
+                            return Ok(Expr::Value(name.clone()))
+                        }
+                        _ => {}
                     }
                 }
                 Ok(Expr::ControlText(name.clone()))
@@ -542,7 +595,20 @@ impl Parser {
                     return Ok(Stmt::Meta(first, v.trim().to_string()));
                 }
             }
-            "copy" | "move" | "delete" | "open" | "popup" | "toast" | "sleep" | "launchGame" | "mkdir" | "exists" | "listFiles" => {
+            // set 名字 = 表达式
+            "set" => {
+                if !matches!(toks.get(2), Some(Tok::Eq)) {
+                    return Err(self.err("set 语法应为：set 名字 = 表达式"));
+                }
+                let name = ident(toks.get(1).ok_or_else(|| self.err("set 缺少名字"))?)
+                    .ok_or_else(|| self.err("set 后面的名字不合法"))?
+                    .to_string();
+                let expr = self.expr_from_toks(&toks[3..])?;
+                return Ok(Stmt::SetVar(name, expr));
+            }
+            "copy" | "move" | "delete" | "open" | "popup" | "toast" | "sleep" | "launchGame"
+            | "mkdir" | "exists" | "listFiles" | "writeFile" | "appendFile" | "readFile"
+            | "rename" | "copyText" | "log" | "zip" | "unzip" | "notify" => {
                 return Ok(Stmt::Action(self.action_from_toks(toks)?));
             }
             _ => {}
@@ -585,8 +651,8 @@ impl Parser {
             }
             "delete" => Ok(Action::Delete(self.path_arg(toks.get(1), "delete 缺少目标")?)),
             "open" => Ok(Action::Open(self.path_arg(toks.get(1), "open 缺少目标")?)),
-            "popup" => Ok(Action::Popup(self.text_arg(toks)?)),
-            "toast" => Ok(Action::Toast(self.text_arg(toks)?)),
+            "popup" => Ok(Action::Popup(self.rest_expr(toks, 1)?)),
+            "toast" => Ok(Action::Toast(self.rest_expr(toks, 1)?)),
             "sleep" => {
                 let n: f64 = toks
                     .get(1)
@@ -601,22 +667,43 @@ impl Parser {
             "mkdir" => Ok(Action::Mkdir(self.path_arg(toks.get(1), "mkdir 缺少路径")?)),
             "exists" => Ok(Action::Exists(self.path_arg(toks.get(1), "exists 缺少路径")?)),
             "listFiles" => Ok(Action::ListFiles(self.path_arg(toks.get(1), "listFiles 缺少路径")?)),
-            _ => Err(self.err("未知动作")),
-        }
-    }
-
-    // popup/toast 文本参数：支持括号式 popup('文字') 与裸式 toast '文字'
-    fn text_arg(&self, toks: &[Tok]) -> Result<String, String> {
-        if matches!(toks.get(1), Some(Tok::LParen)) {
-            toks.iter()
-                .find_map(|t| match t {
-                    Tok::Str(s) => Some(s.clone()),
-                    _ => None,
+            // ---- v1.1 新增 ----
+            "writeFile" | "appendFile" => {
+                let path = self.path_arg(toks.get(1), "缺少文件路径")?;
+                let text = self.rest_expr(toks, 2)?;
+                Ok(if kw == "writeFile" {
+                    Action::WriteFile(path, text)
+                } else {
+                    Action::AppendFile(path, text)
                 })
-                .ok_or_else(|| self.err("popup/toast 缺少文字"))
-        } else {
-            self.str_arg(toks.get(1))
-                .ok_or_else(|| self.err("popup/toast 缺少文字"))
+            }
+            "readFile" => Ok(Action::ReadFile(self.path_arg(toks.get(1), "readFile 缺少路径")?)),
+            "rename" => {
+                // rename 旧 to 新
+                if !matches!(toks.get(2), Some(Tok::Ident(t)) if t == "to") {
+                    return Err(self.err("rename 语法应为：rename 旧 to 新"));
+                }
+                Ok(Action::Rename(
+                    self.path_arg(toks.get(1), "rename 缺少原路径")?,
+                    self.path_arg(toks.get(3), "rename 缺少新路径")?,
+                ))
+            }
+            "copyText" => Ok(Action::CopyText(self.rest_expr(toks, 1)?)),
+            "log" => Ok(Action::Log(self.rest_expr(toks, 1)?)),
+            "notify" => Ok(Action::Notify(self.rest_expr(toks, 1)?)),
+            "zip" | "unzip" => {
+                let src = self.path_arg(toks.get(1), "缺少源路径")?;
+                if !matches!(toks.get(2), Some(Tok::Ident(t)) if t == "to") {
+                    return Err(self.err(&format!("{} 语法应为：{} 源 to 目标", kw, kw)));
+                }
+                let dst = self.path_arg(toks.get(3), "缺少目标路径")?;
+                Ok(if kw == "zip" {
+                    Action::Zip(src, dst)
+                } else {
+                    Action::Unzip(src, dst)
+                })
+            }
+            _ => Err(self.err("未知动作")),
         }
     }
 
@@ -625,6 +712,25 @@ impl Parser {
             Some(Tok::Str(s)) | Some(Tok::Ident(s)) => Ok(s.clone()),
             _ => Err(self.err(msg)),
         }
+    }
+
+    /// 把 from 之后的 token 当作一个表达式（运行时求值）：
+    /// `notify '共 ' + count + ' 个'` 这种拼接也支持。
+    fn rest_expr(&self, toks: &[Tok], from: usize) -> Result<Expr, String> {
+        let mut slice = &toks[from.min(toks.len())..];
+        // 兼容括号式：toast('文字')
+        if matches!(slice.first(), Some(Tok::LParen)) {
+            slice = &slice[1..];
+        }
+        let mut end = slice.len();
+        if end > 0 && matches!(slice[end - 1], Tok::RParen) {
+            end -= 1;
+        }
+        let slice = &slice[..end];
+        if slice.is_empty() {
+            return Err(self.err("缺少文字内容"));
+        }
+        self.expr_from_toks(slice)
     }
 
     fn str_arg(&self, t: Option<&Tok>) -> Option<String> {
@@ -730,6 +836,8 @@ pub struct ControlNode {
     pub list: Vec<String>,
     pub checked: bool,
     pub selected: Option<String>,
+    /// 控件的当前值（输入框内容 / 滑块位置），由前端在触发事件时回传
+    pub value: Option<String>,
     pub line_len: Option<i64>,
     pub portrait: bool,
 }
@@ -755,6 +863,8 @@ pub struct PluginRuntime {
     pub page_injects: HashMap<String, Vec<ControlNode>>,
     /// 页面控件覆盖：page_name -> { control_name -> text }
     pub page_overrides: HashMap<String, HashMap<String, String>>,
+    /// 插件自己的变量（`set 名字 = 表达式`），跨事件保留
+    pub vars: HashMap<String, String>,
 }
 
 impl PluginRuntime {
@@ -826,6 +936,7 @@ pub fn build_runtime(src: &str, plugin_dir: PathBuf) -> Result<PluginRuntime, St
         last_error: None,
         page_injects: HashMap::new(),
         page_overrides: HashMap::new(),
+        vars: HashMap::new(),
     };
     // 分派顶层语句
     for s in &stmts {
@@ -848,6 +959,7 @@ pub fn build_runtime(src: &str, plugin_dir: PathBuf) -> Result<PluginRuntime, St
                     list,
                     checked: false,
                     selected: None,
+                    value: None,
                     line_len,
                     portrait,
                 });
@@ -898,6 +1010,7 @@ pub fn build_runtime(src: &str, plugin_dir: PathBuf) -> Result<PluginRuntime, St
                                 list,
                                 checked: false,
                                 selected: None,
+                                value: None,
                                 line_len,
                                 portrait,
                             });
@@ -933,11 +1046,19 @@ fn eval_expr(e: &Expr, rt: &PluginRuntime, ctx: &HashMap<String, String>) -> Res
                 n.to_string()
             }
         }
+        // 标识符：循环变量 → 插件变量 → 控件文字
         Expr::ControlText(n) => ctx
             .get(n)
             .cloned()
+            .or_else(|| rt.vars.get(n).cloned())
             .or_else(|| rt.control(n).map(|c| c.text.clone()))
             .unwrap_or_default(),
+        // 控件当前值：输入框取输入内容，滑块取位置，其余退回文字
+        Expr::Value(n) => rt
+            .control(n)
+            .map(|c| c.value.clone().unwrap_or_else(|| c.text.clone()))
+            .unwrap_or_default(),
+        Expr::Concat(a, b) => format!("{}{}", eval_expr(a, rt, ctx)?, eval_expr(b, rt, ctx)?),
         Expr::Selected(n) => rt
             .control(n)
             .and_then(|c| c.selected.clone())
@@ -1006,6 +1127,7 @@ async fn exec_block(
                         list,
                         checked: false,
                         selected: None,
+                        value: None,
                         line_len,
                         portrait,
                     });
@@ -1029,6 +1151,13 @@ async fn exec_block(
                         }
                     }
                 }
+            }
+            Stmt::SetVar(name, expr) => {
+                let val = {
+                    let guard = rt.lock().unwrap();
+                    eval_expr(expr, &guard, ctx)?
+                };
+                rt.lock().unwrap().vars.insert(name.clone(), val);
             }
             Stmt::Listen(_, _, _) => {
                 // listen 仅顶层收集，块内忽略
@@ -1087,7 +1216,7 @@ async fn exec_block(
             }
             Stmt::Break => return Ok(()),
             Stmt::Action(action) => {
-                exec_action(rt, action, notify).await?;
+                exec_action(rt, action, notify, ctx).await?;
             }
             Stmt::Page(_, _) => {}
         }
@@ -1099,7 +1228,13 @@ async fn exec_action(
     rt: &Arc<Mutex<PluginRuntime>>,
     action: &Action,
     notify: &mut Vec<Notify>,
+    ctx: &HashMap<String, String>,
 ) -> Result<(), String> {
+    // 文本类动作统一在这里求值（支持 '共 ' + count + ' 个'）
+    let eval = |e: &Expr| -> Result<String, String> {
+        let guard = rt.lock().unwrap();
+        eval_expr(e, &guard, ctx)
+    };
     match action {
         Action::Copy(a, b) => {
             let (src, dst) = {
@@ -1140,11 +1275,11 @@ async fn exec_action(
             open::that(p.to_string_lossy().to_string()).map_err(|e| format!("打开失败: {}", e))
         }
         Action::Popup(t) => {
-            notify.push(Notify { kind: "popup".to_string(), text: t.clone() });
+            notify.push(Notify { kind: "popup".to_string(), text: eval(t)? });
             Ok(())
         }
         Action::Toast(t) => {
-            notify.push(Notify { kind: "toast".to_string(), text: t.clone() });
+            notify.push(Notify { kind: "toast".to_string(), text: eval(t)? });
             Ok(())
         }
         Action::Sleep(n) => {
@@ -1187,8 +1322,195 @@ async fn exec_action(
             notify.push(Notify { kind: "toast".to_string(), text });
             Ok(())
         }
+        // ---- v1.1 新增 ----
+        Action::WriteFile(path, text) => {
+            let p = { rt.lock().unwrap().resolve_path(path) };
+            let body = eval(text)?;
+            if let Some(parent) = p.parent() {
+                std::fs::create_dir_all(parent).map_err(|e| format!("创建目录失败: {}", e))?;
+            }
+            std::fs::write(&p, body).map_err(|e| format!("写入失败: {}", e))
+        }
+        Action::AppendFile(path, text) => {
+            let p = { rt.lock().unwrap().resolve_path(path) };
+            let body = eval(text)?;
+            if let Some(parent) = p.parent() {
+                std::fs::create_dir_all(parent).map_err(|e| format!("创建目录失败: {}", e))?;
+            }
+            use std::io::Write as _;
+            let mut f = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(&p)
+                .map_err(|e| format!("打开文件失败: {}", e))?;
+            f.write_all(body.as_bytes()).map_err(|e| format!("写入失败: {}", e))
+        }
+        Action::ReadFile(path) => {
+            let p = { rt.lock().unwrap().resolve_path(path) };
+            let body = std::fs::read_to_string(&p).map_err(|e| format!("读取失败: {}", e))?;
+            // 只读前 300 个字符，避免长文件把 toast 撑爆
+            let preview: String = body.chars().take(300).collect();
+            let suffix = if body.chars().count() > 300 { "…" } else { "" };
+            notify.push(Notify {
+                kind: "toast".to_string(),
+                text: format!("{}：{}{}", path, preview, suffix),
+            });
+            Ok(())
+        }
+        Action::Rename(from, to) => {
+            let (src, dst) = {
+                let guard = rt.lock().unwrap();
+                (guard.resolve_path(from), guard.resolve_path(to))
+            };
+            if !src.exists() {
+                return Err(format!("重命名失败：\"{}\" 不存在", from));
+            }
+            if let Some(parent) = dst.parent() {
+                std::fs::create_dir_all(parent).map_err(|e| format!("创建目录失败: {}", e))?;
+            }
+            std::fs::rename(&src, &dst).map_err(|e| format!("重命名失败: {}", e))
+        }
+        Action::CopyText(t) => {
+            let body = eval(t)?;
+            write_clipboard(&body)
+        }
+        Action::Log(t) => {
+            let body = eval(t)?;
+            let p = { rt.lock().unwrap().plugin_dir.join("plugin.log") };
+            use std::io::Write as _;
+            if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&p) {
+                let _ = writeln!(f, "{}", body);
+            }
+            Ok(())
+        }
+        Action::Notify(t) => {
+            notify.push(Notify { kind: "notify".to_string(), text: eval(t)? });
+            Ok(())
+        }
+        Action::Zip(src, dst) => {
+            let (s_path, d_path) = {
+                let guard = rt.lock().unwrap();
+                (guard.resolve_path(src), guard.resolve_path(dst))
+            };
+            zip_dir(&s_path, &d_path)
+        }
+        Action::Unzip(src, dst) => {
+            let (s_path, d_path) = {
+                let guard = rt.lock().unwrap();
+                (guard.resolve_path(src), guard.resolve_path(dst))
+            };
+            unzip_into(&s_path, &d_path)
+        }
         Action::LaunchGame => Err("launchGame 尚未实现（P1）".to_string()),
     }
+}
+
+/// 写系统剪贴板：三平台各用自己的命令行工具，缺工具时给出可读的错误
+fn write_clipboard(text: &str) -> Result<(), String> {
+    use std::io::Write as _;
+    use std::process::{Command, Stdio};
+    let (cmd, args): (&str, &[&str]) = if cfg!(target_os = "macos") {
+        ("pbcopy", &[])
+    } else if cfg!(target_os = "windows") {
+        ("cmd", &["/C", "clip"])
+    } else {
+        ("xclip", &["-selection", "clipboard"])
+    };
+    let mut child = Command::new(cmd)
+        .args(args)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .map_err(|e| format!("复制到剪贴板失败（缺少 {}）：{}", cmd, e))?;
+    if let Some(stdin) = child.stdin.as_mut() {
+        stdin
+            .write_all(text.as_bytes())
+            .map_err(|e| format!("写入剪贴板失败: {}", e))?;
+    }
+    child.wait().map_err(|e| format!("剪贴板命令失败: {}", e))?;
+    Ok(())
+}
+
+/// 递归把目录/文件打包成 zip（目标已存在则覆盖）
+fn zip_dir(src: &std::path::Path, dst: &std::path::Path) -> Result<(), String> {
+    if !src.exists() {
+        return Err(format!("打包失败：\"{}\" 不存在", src.display()));
+    }
+    if let Some(parent) = dst.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| format!("创建目录失败: {}", e))?;
+    }
+    let file = std::fs::File::create(dst).map_err(|e| format!("创建压缩包失败: {}", e))?;
+    let mut zw = zip::ZipWriter::new(file);
+    let opts = zip::write::FileOptions::default();
+    fn walk(
+        zw: &mut zip::ZipWriter<std::fs::File>,
+        root: &std::path::Path,
+        cur: &std::path::Path,
+        opts: zip::write::FileOptions,
+    ) -> Result<(), String> {
+        let rd = std::fs::read_dir(cur).map_err(|e| format!("读取目录失败: {}", e))?;
+        for e in rd.flatten() {
+            let p = e.path();
+            let rel = p
+                .strip_prefix(root)
+                .map_err(|e| format!("路径计算失败: {}", e))?
+                .to_string_lossy()
+                .replace('\\', "/");
+            if p.is_dir() {
+                zw.add_directory(format!("{}/", rel), opts)
+                    .map_err(|e| format!("写入目录失败: {}", e))?;
+                walk(zw, root, &p, opts)?;
+            } else {
+                zw.start_file(rel, opts)
+                    .map_err(|e| format!("写入文件失败: {}", e))?;
+                let mut f = std::fs::File::open(&p).map_err(|e| format!("打开失败: {}", e))?;
+                std::io::copy(&mut f, zw).map_err(|e| format!("写入失败: {}", e))?;
+            }
+        }
+        Ok(())
+    }
+    if src.is_dir() {
+        walk(&mut zw, src, src, opts)?;
+    } else {
+        let name = src
+            .file_name()
+            .map(|s| s.to_string_lossy().to_string())
+            .unwrap_or_else(|| "file".to_string());
+        zw.start_file(name, opts)
+            .map_err(|e| format!("写入文件失败: {}", e))?;
+        let mut f = std::fs::File::open(src).map_err(|e| format!("打开失败: {}", e))?;
+        std::io::copy(&mut f, &mut zw).map_err(|e| format!("写入失败: {}", e))?;
+    }
+    zw.finish().map_err(|e| format!("收尾失败: {}", e))?;
+    Ok(())
+}
+
+/// 解压 zip 到目录（跳过含 `..` 的条目，防目录穿越）
+fn unzip_into(src: &std::path::Path, dst: &std::path::Path) -> Result<(), String> {
+    let file = std::fs::File::open(src).map_err(|e| format!("打开压缩包失败: {}", e))?;
+    let mut archive = zip::ZipArchive::new(file).map_err(|e| format!("解析压缩包失败: {}", e))?;
+    std::fs::create_dir_all(dst).map_err(|e| format!("创建目录失败: {}", e))?;
+    for i in 0..archive.len() {
+        let mut entry = archive
+            .by_index(i)
+            .map_err(|e| format!("读取压缩包失败: {}", e))?;
+        let rel = entry.mangled_name();
+        if rel.components().any(|c| matches!(c, std::path::Component::ParentDir)) {
+            continue;
+        }
+        let out = dst.join(rel);
+        if entry.is_dir() {
+            std::fs::create_dir_all(&out).map_err(|e| format!("创建目录失败: {}", e))?;
+        } else {
+            if let Some(parent) = out.parent() {
+                std::fs::create_dir_all(parent).map_err(|e| format!("创建目录失败: {}", e))?;
+            }
+            let mut f = std::fs::File::create(&out).map_err(|e| format!("创建文件失败: {}", e))?;
+            std::io::copy(&mut entry, &mut f).map_err(|e| format!("解压失败: {}", e))?;
+        }
+    }
+    Ok(())
 }
 
 fn copy_recursive(src: &std::path::Path, dst: &std::path::Path) -> Result<(), String> {
@@ -1227,6 +1549,7 @@ pub fn controls_to_json(rt: &PluginRuntime) -> serde_json::Value {
                     "list": c.list,
                     "checked": c.checked,
                     "selected": c.selected,
+                    "value": c.value,
                     "lineLength": c.line_len,
                     "portrait": c.portrait,
                 })
@@ -1283,7 +1606,14 @@ pub async fn dispatch_event(
     rt: &Arc<Mutex<PluginRuntime>>,
     target: &ListenerTarget,
     event: &str,
+    value: Option<String>,
 ) -> Result<(Vec<Notify>, serde_json::Value), String> {
+    // 前端把输入框/滑块的当前值一并带过来，控件里的 `X.value` 才读得到
+    if let (Some(v), ListenerTarget::Control(name)) = (value, target) {
+        if let Some(c) = rt.lock().unwrap().control_mut(name) {
+            c.value = Some(v);
+        }
+    }
     let handlers = {
         let guard = rt.lock().unwrap();
         guard
@@ -1449,6 +1779,7 @@ listen Msg.click:
             &arc,
             &ListenerTarget::Control("Msg".to_string()),
             "click",
+            None,
         ))
         .expect("dispatch");
         assert_eq!(notify.len(), 1, "toast: {:?}", notify);
@@ -1483,6 +1814,7 @@ listen Note.click:
             &arc,
             &ListenerTarget::Control("Note".to_string()),
             "click",
+            None,
         ))
         .expect("dispatch");
         assert_eq!(notify.len(), 2, "notify: {:?}", notify);
@@ -1490,6 +1822,62 @@ listen Note.click:
         assert!(dir.join("tmp/new-folder").is_dir());
         let _ = std::fs::remove_dir_all(&dir);
     }
+    /// v1.1 新接口：拼接表达式 + set 变量 + 写读文件 + 压缩解压
+    #[test]
+    fn v11_expressions_vars_and_file_actions() {
+        let src = r#"
+name: V11
+Note = CreateText('x')
+listen Note.click:
+    set count = 3
+    set who = 'Crystal'
+    toast('共 ' + count + ' 个 ' + who)
+    writeFile 'out/note.txt' 'hello ' + who
+    appendFile 'out/note.txt' '!'
+    readFile 'out/note.txt'
+    zip 'out' to 'out.zip'
+    unzip 'out.zip' to 'unz'
+"#;
+        let dir = std::env::temp_dir().join(format!("lumia-v11-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let rt = build_runtime(src, dir.clone()).expect("build");
+        let arc = Arc::new(Mutex::new(rt));
+        let rt_run = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let (notify, _tree) = rt_run
+            .block_on(dispatch_event(
+                &arc,
+                &ListenerTarget::Control("Note".to_string()),
+                "click",
+                None,
+            ))
+            .expect("dispatch");
+
+        // 拼接 + 变量：'共 ' + count + ' 个 ' + who
+        assert!(
+            notify.iter().any(|n| n.text == "共 3 个 Crystal"),
+            "拼接结果不对: {:?}",
+            notify.iter().map(|n| &n.text).collect::<Vec<_>>()
+        );
+
+        // writeFile + appendFile
+        let body = std::fs::read_to_string(dir.join("out/note.txt")).unwrap();
+        assert_eq!(body, "hello Crystal!");
+
+        // readFile 会把内容回显到 toast
+        assert!(notify.iter().any(|n| n.text.contains("hello Crystal!")));
+
+        // zip → unzip 往返
+        assert!(dir.join("out.zip").is_file(), "zip 没产出");
+        assert!(dir.join("unz/note.txt").is_file(), "unzip 没解出来");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     #[test]
     fn system_event_broadcast_runs() {
         let src = r#"
@@ -1514,6 +1902,7 @@ listen game_quit:
             &arc,
             &ListenerTarget::System("game_start".to_string()),
             "",
+            None,
         ))
         .expect("dispatch");
         assert!(notify.iter().any(|n| n.kind == "toast" && n.text.contains("游戏开始了")), "no toast, got {:?}", notify);
@@ -1522,6 +1911,7 @@ listen game_quit:
             &arc,
             &ListenerTarget::System("game_quit".to_string()),
             "",
+            None,
         ))
         .expect("dispatch");
         assert!(notify2.iter().any(|n| n.kind == "popup" && n.text.contains("游戏退出了")));

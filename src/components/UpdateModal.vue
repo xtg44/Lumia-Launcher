@@ -13,7 +13,7 @@ import {
 } from '../utils/tauri'
 import { useI18n } from 'vue-i18n'
 
-const { t } = useI18n()
+const { t, locale } = useI18n()
 
 /**
  * 弹窗状态机：
@@ -34,6 +34,26 @@ const prepared = ref<PreparedUpdate | null>(null)
 const busy = ref(false)
 /** 设置项：下载完成后是否直接更新重启（默认关） */
 const autoRestart = ref(false)
+
+/**
+ * 本次更新说明。官网接口的 `notes` 有两种形态：
+ *   - `{ "zh-CN": "...", "en": "..." }`：按界面语言挑一条，挑不到退回 zh-CN / en
+ *   - 一整段字符串：所有语言共用
+ */
+const changelog = computed(() => {
+  const notes = info.value?.notes
+  if (!notes) return ''
+  if (typeof notes === 'string') return notes.trim()
+  const lang = String(locale.value)
+  const pick =
+    notes[lang] ??
+    notes[lang.split('-')[0]] ??
+    (lang.startsWith('zh') ? notes['zh-CN'] ?? notes['zh'] : notes.en) ??
+    notes.en ??
+    notes['zh-CN'] ??
+    Object.values(notes)[0]
+  return typeof pick === 'string' ? pick.trim() : ''
+})
 
 /** 能走自更新：服务端提供了更新包，且路径闸门通过 */
 const canSelfUpdate = computed(
@@ -61,6 +81,30 @@ const primaryDisabled = computed(
 )
 
 // ===== 事件监听（下载进度 + 校验/解压阶段）=====
+/**
+ * 卡住看门狗：下载超过 45 秒没有任何进度回调，就认为卡死了。
+ * 不做这个的话，服务端半路不回数据时进度条会永远停在某个百分比。
+ */
+let stallTimer: ReturnType<typeof setTimeout> | null = null
+const STALL_MS = 45_000
+
+function clearStall() {
+  if (stallTimer) {
+    clearTimeout(stallTimer)
+    stallTimer = null
+  }
+}
+
+function armStall() {
+  clearStall()
+  stallTimer = setTimeout(() => {
+    if (phase.value !== 'working') return
+    phase.value = 'error'
+    busy.value = false
+    errorMsg.value = t('app.update.stalled')
+  }, STALL_MS)
+}
+
 let unlistenProgress: (() => void) | null = null
 let unlistenStage: (() => void) | null = null
 let listenersReady = false
@@ -78,6 +122,7 @@ async function ensureListeners() {
   unlistenStage = await listenSelfUpdateStage((p) => {
     if (!busy.value) return
     if (p?.message) stageText.value = p.message
+    armStall()
   })
 }
 
@@ -115,16 +160,14 @@ async function check() {
     }
     visible.value = true
 
-    // 自动下载（默认开）：让用户看到进度条，而不是被丢去浏览器
+    // 只读「下载完成后自动重启」这一个开关。
+    // 下载本身必须等用户看完更新说明、点了按钮再开始 —— 不要一上来就悄悄拉几百 MB。
     if (!busy.value && phase.value === 'available') {
       try {
         const config = await getConfig()
         autoRestart.value = config.auto_restart_update === true
-        if (config.auto_download_update !== false && canSelfUpdate.value) {
-          await startInstall()
-        }
       } catch {
-        // 读配置失败就不自动下载
+        // 读配置失败就按默认（不自动重启）
       }
     }
   } catch {
@@ -139,6 +182,7 @@ async function startInstall() {
 
   busy.value = true
   phase.value = 'working'
+  armStall()
   progress.value = 0
   stageText.value = t('app.update.downloading')
   errorMsg.value = ''
@@ -156,6 +200,7 @@ async function startInstall() {
     phase.value = 'error'
   } finally {
     busy.value = false
+    clearStall()
   }
 }
 
@@ -177,7 +222,7 @@ async function applyNow() {
 async function handleOpenSite() {
   const info0 = info.value
   const fallback = info0?.channel === 'stable' ? info0?.stableDownload : info0?.betaDownload
-  const target = info0?.updatePackage?.url || info0?.downloadUrl || fallback || 'https://lumialauncher.cn'
+  const target = info0?.updatePackage?.url || info0?.downloadUrl || fallback || 'https://crystallauncher.cn'
   visible.value = false
   try {
     await openUrl(target)
@@ -216,6 +261,12 @@ defineExpose({ check })
         <div class="modal-body">
           <p class="update-line">{{ t('app.update.current') }} <strong>{{ info?.current }}</strong></p>
           <p class="update-line latest">{{ t('app.update.latest') }} <strong>{{ info?.latest }}</strong></p>
+
+          <!-- 本次更新内容（来自官网接口的 notes） -->
+          <div v-if="changelog" class="update-notes">
+            <p class="update-notes-title">{{ t('app.update.whatsNew') }}</p>
+            <pre class="update-notes-body">{{ changelog }}</pre>
+          </div>
 
           <!-- 下载 / 校验 / 解压 -->
           <template v-if="phase === 'working'">
@@ -455,5 +506,30 @@ defineExpose({ check })
   .modal-enter-active .modal-card,
   .modal-leave-active .modal-card,
   .update-progress-fill { transition: none; transform: none; }
+}
+
+.update-notes {
+  margin: 10px 0 4px;
+  padding: 10px 12px;
+  max-height: 220px;
+  overflow-y: auto;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+.update-notes-title {
+  margin: 0 0 6px;
+  font-size: 0.82rem;
+  font-weight: 700;
+  opacity: 0.75;
+}
+.update-notes-body {
+  margin: 0;
+  font-family: inherit;
+  font-size: 0.84rem;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+  opacity: 0.9;
 }
 </style>

@@ -19,11 +19,11 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use crate::lumia_data_dir;
+use crate::app_data_dir;
 
 /// 更新工作目录：<数据目录>/updates
 pub fn updates_root() -> PathBuf {
-    lumia_data_dir().join("updates")
+    app_data_dir().join("updates")
 }
 
 /// helper 日志（每次派发前清空；若上次失败会留在里面给前端提示）
@@ -263,10 +263,41 @@ fn macho_cpu(path: &Path) -> Option<String> {
     }
 }
 
+/// 取 .app 内部的主可执行文件路径。
+///
+/// 不能写死二进制名：它跟着 Cargo 包名走（改名前的包名是 `lumia-launcher`，
+/// 现在叫 `crystal-launcher`），写死会让新版更新包在旧命名下校验失败。
+/// 优先读 Info.plist 的 CFBundleExecutable，读不到再退回扫描 Contents/MacOS。
+#[cfg(target_os = "macos")]
+fn macos_app_binary(app: &Path) -> Option<PathBuf> {
+    let macos_dir = app.join("Contents/MacOS");
+    if let Ok(plist) = fs::read_to_string(app.join("Contents/Info.plist")) {
+        // 极小的 plist 解析：找到 key 后面的第一个 <string>，不引第三方依赖
+        if let Some(k) = plist.find("CFBundleExecutable") {
+            let rest = &plist[k..];
+            if let Some(s) = rest.find("<string>") {
+                let after = &rest[s + "<string>".len()..];
+                if let Some(e) = after.find("</string>") {
+                    let name = after[..e].trim();
+                    if !name.is_empty() {
+                        return Some(macos_dir.join(name));
+                    }
+                }
+            }
+        }
+    }
+    // 兜底：Contents/MacOS 下第一个普通文件（标准 .app 里通常只有主程序）
+    fs::read_dir(&macos_dir)
+        .ok()?
+        .flatten()
+        .map(|e| e.path())
+        .find(|p| p.is_file())
+}
+
 /// 校验解压出来的 .app 结构：可执行文件存在、有执行位、架构匹配
 #[cfg(target_os = "macos")]
 fn verify_macos_app(app: &Path) -> Result<(), String> {
-    let bin = app.join("Contents/MacOS/lumia-launcher");
+    let bin = macos_app_binary(app).ok_or("更新包结构不完整（缺少主程序）")?;
     if !bin.is_file() {
         return Err("更新包结构不完整（缺少主程序）".into());
     }
@@ -461,7 +492,7 @@ pub fn take_last_error() -> Option<String> {
 /// helper 脚本。参数：pid / target(.app) / staged(.app) / log / workdir
 #[cfg(target_os = "macos")]
 const MAC_HELPER: &str = r#"#!/bin/sh
-# Lumia Launcher 自更新 helper —— 由主程序在退出前生成并派发。
+# Crystal Launcher 自更新 helper —— 由主程序在退出前生成并派发。
 # 应用此刻已经退出，安装目录里的文件没有持有者，替换就是普通文件操作。
 set -u
 PID="$1"

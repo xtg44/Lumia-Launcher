@@ -1,0 +1,20 @@
+{
+    "logs": [
+        {
+            "outputFile": "com.crystal.android.app-mergeDebugResources-50:/values-watch-v21/values-watch-v21.xml",
+            "map": [
+                {
+                    "source": "/Users/xiaotiangua/.gradle/caches/9.6.1/transforms/adab20a893633f9b86246109b7bf615c/transformed/appcompat-1.8.0/res/values-watch-v21/values-watch-v21.xml",
+                    "from": {
+                        "startLines": "2,6,10",
+                        "startColumns": "4,4,4",
+                        "startOffsets": "55,271,499",
+                        "endLines": "5,9,13",
+                        "endColumns": "12,12,12",
+                        "endOffsets": "266,494,724"
+                    }
+                }
+            ]
+        }
+    ]
+}

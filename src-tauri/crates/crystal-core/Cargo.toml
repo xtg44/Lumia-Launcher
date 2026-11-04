@@ -1,0 +1,23 @@
+[package]
+name = "crystal-core"
+version = "1.0.0"
+edition = "2021"
+license = "MIT"
+description = "Crystal Launcher platform-agnostic core: version manifest, downloads, auth, Lumi interpreter"
+repository = "https://github.com/xtg44/Crystal-Launcher"
+
+[features]
+default = []
+# 供安卓端时导出 FFI 桥（uniffi），仅在建 .a/静态库时启用。
+ffi = ["dep:uniffi"]
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "http2", "charset", "system-proxy", "blocking"] }
+sha1 = "0.10"
+hex = "0.4"
+uniffi = { version = "0.32", optional = true }
+
+[lib]
+crate-type = ["lib", "staticlib", "cdylib"]

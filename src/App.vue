@@ -651,8 +651,8 @@ const bgScrim = computed(() => (isDarkTheme.value ? 'rgba(0, 0, 0, 0.55)' : 'tra
     </div>
     <header class="header" @mousedown.capture="handleTitlebarMouseDown">
       <div class="logo-wrapper">
-        <img src="./assets/icons/Lumia.png" alt="Lumia" class="logo-image" />
-        <span class="logo-text">Lumia</span>
+        <img src="./assets/icons/Crystal.png" alt="Crystal" class="logo-image" />
+        <span class="logo-text">Crystal</span>
       </div>
       <div class="download-header" :class="{ 'has-tasks': activeDownloadCount > 0 }">
         <span class="download-status">{{ launchActive ? t('downloadDetail.launching') : t('app.downloading', { count: activeDownloadCount }) }}</span>

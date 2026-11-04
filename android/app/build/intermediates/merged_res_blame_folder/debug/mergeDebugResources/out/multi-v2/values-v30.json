@@ -1,0 +1,19 @@
+{
+    "logs": [
+        {
+            "outputFile": "com.crystal.android.app-mergeDebugResources-50:/values-v30/values-v30.xml",
+            "map": [
+                {
+                    "source": "/Users/xiaotiangua/.gradle/caches/9.6.1/transforms/f136a8e9e619b520dd247fe2582d051e/transformed/material3-release/res/values-v30/values-v30.xml",
+                    "from": {
+                        "startLines": "2",
+                        "startColumns": "4",
+                        "startOffsets": "55",
+                        "endColumns": "72",
+                        "endOffsets": "123"
+                    }
+                }
+            ]
+        }
+    ]
+}

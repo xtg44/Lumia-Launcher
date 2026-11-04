@@ -1,0 +1,12 @@
+[package]
+name = "crystal-bindgen"
+version = "1.0.0"
+edition = "2021"
+license = "MIT"
+publish = false
+description = "Build helper: generate Kotlin bindings from crystal-core's uniffi FFI bridge"
+
+[dependencies]
+uniffi_bindgen = "0.32"
+camino = "1"
+anyhow = "1"

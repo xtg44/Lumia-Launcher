@@ -1,0 +1,58 @@
+[
+    {
+        "merged": "/Users/xiaotiangua/.gradle/daemon/9.6.1/com.crystal.android.app-debug-52:/mipmap-xxhdpi_ic_launcher.png.flat",
+        "source": "/Users/xiaotiangua/.gradle/daemon/9.6.1/com.crystal.android.app-main-54:/mipmap-xxhdpi/ic_launcher.png"
+    },
+    {
+        "merged": "/Users/xiaotiangua/.gradle/daemon/9.6.1/com.crystal.android.app-debug-52:/drawable_ic_nav_download.xml.flat",
+        "source": "/Users/xiaotiangua/.gradle/daemon/9.6.1/com.crystal.android.app-main-54:/drawable/ic_nav_download.xml"
+    },
+    {
+        "merged": "/Users/xiaotiangua/.gradle/daemon/9.6.1/com.crystal.android.app-debug-52:/mipmap-hdpi_ic_launcher.png.flat",
+        "source": "/Users/xiaotiangua/.gradle/daemon/9.6.1/com.crystal.android.app-main-54:/mipmap-hdpi/ic_launcher.png"
+    },
+    {
+        "merged": "/Users/xiaotiangua/.gradle/daemon/9.6.1/com.crystal.android.app-debug-52:/drawable_ic_nav_ai.xml.flat",
+        "source": "/Users/xiaotiangua/.gradle/daemon/9.6.1/com.crystal.android.app-main-54:/drawable/ic_nav_ai.xml"
+    },
+    {
+        "merged": "/Users/xiaotiangua/.gradle/daemon/9.6.1/com.crystal.android.app-debug-52:/drawable_ic_nav_terracotta.xml.flat",
+        "source": "/Users/xiaotiangua/.gradle/daemon/9.6.1/com.crystal.android.app-main-54:/drawable/ic_nav_terracotta.xml"
+    },
+    {
+        "merged": "/Users/xiaotiangua/.gradle/daemon/9.6.1/com.crystal.android.app-debug-52:/drawable_ic_nav_home.xml.flat",
+        "source": "/Users/xiaotiangua/.gradle/daemon/9.6.1/com.crystal.android.app-main-54:/drawable/ic_nav_home.xml"
+    },
+    {
+        "merged": "/Users/xiaotiangua/.gradle/daemon/9.6.1/com.crystal.android.app-debug-52:/drawable_ic_nav_version.xml.flat",
+        "source": "/Users/xiaotiangua/.gradle/daemon/9.6.1/com.crystal.android.app-main-54:/drawable/ic_nav_version.xml"
+    },
+    {
+        "merged": "/Users/xiaotiangua/.gradle/daemon/9.6.1/com.crystal.android.app-debug-52:/drawable_ic_nav_music.xml.flat",
+        "source": "/Users/xiaotiangua/.gradle/daemon/9.6.1/com.crystal.android.app-main-54:/drawable/ic_nav_music.xml"
+    },
+    {
+        "merged": "/Users/xiaotiangua/.gradle/daemon/9.6.1/com.crystal.android.app-debug-52:/drawable_ic_nav_settings.xml.flat",
+        "source": "/Users/xiaotiangua/.gradle/daemon/9.6.1/com.crystal.android.app-main-54:/drawable/ic_nav_settings.xml"
+    },
+    {
+        "merged": "com.crystal.android.app-debug-52:/drawable_ic_nav_plugin.xml.flat",
+        "source": "com.crystal.android.app-main-54:/drawable/ic_nav_plugin.xml"
+    },
+    {
+        "merged": "/Users/xiaotiangua/.gradle/daemon/9.6.1/com.crystal.android.app-debug-52:/drawable-nodpi_crystal_logo.png.flat",
+        "source": "/Users/xiaotiangua/.gradle/daemon/9.6.1/com.crystal.android.app-main-54:/drawable-nodpi/crystal_logo.png"
+    },
+    {
+        "merged": "/Users/xiaotiangua/.gradle/daemon/9.6.1/com.crystal.android.app-debug-52:/mipmap-xhdpi_ic_launcher.png.flat",
+        "source": "/Users/xiaotiangua/.gradle/daemon/9.6.1/com.crystal.android.app-main-54:/mipmap-xhdpi/ic_launcher.png"
+    },
+    {
+        "merged": "/Users/xiaotiangua/.gradle/daemon/9.6.1/com.crystal.android.app-debug-52:/mipmap-mdpi_ic_launcher.png.flat",
+        "source": "/Users/xiaotiangua/.gradle/daemon/9.6.1/com.crystal.android.app-main-54:/mipmap-mdpi/ic_launcher.png"
+    },
+    {
+        "merged": "/Users/xiaotiangua/.gradle/daemon/9.6.1/com.crystal.android.app-debug-52:/mipmap-xxxhdpi_ic_launcher.png.flat",
+        "source": "/Users/xiaotiangua/.gradle/daemon/9.6.1/com.crystal.android.app-main-54:/mipmap-xxxhdpi/ic_launcher.png"
+    }
+]

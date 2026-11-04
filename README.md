@@ -1,8 +1,8 @@
 <div align="center">
 
-<img src="icon.png" width="110" alt="Lumia Launcher" />
+<img src="icon.png" width="110" alt="Crystal Launcher" />
 
-# Lumia Launcher
+# Crystal Launcher
 
 **A cross-platform Minecraft launcher** · Tauri 2 + Rust + Vue 3
 
@@ -13,7 +13,7 @@
 [![Rust](https://img.shields.io/badge/Rust-stable-000000?style=flat-square&logo=rust&logoColor=white)](https://www.rust-lang.org/)
 [![License](https://img.shields.io/badge/license-MIT-3DA639?style=flat-square)](LICENSE)
 
-[Website](https://lumialauncher.cn) · [Download](https://lumialauncher.cn) · [Lumi language reference](docs/lumi-reference.md) · [Plugin system design](docs/插件系统设计.md)
+[Website](https://crystallauncher.cn) · [Download](https://crystallauncher.cn) · [Lumi language reference](docs/lumi-reference.md) · [Plugin system design](docs/插件系统设计.md)
 
 **English** · [简体中文](README.zh-CN.md)
 
@@ -23,7 +23,7 @@
 
 ## Overview
 
-Lumia Launcher is a lightweight, cross-platform Minecraft launcher built with **Rust + Tauri 2**, with a **Vue 3 + TypeScript** interface.
+Crystal Launcher is a lightweight, cross-platform Minecraft launcher built with **Rust + Tauri 2**, with a **Vue 3 + TypeScript** interface.
 
 It ships as a small installer, starts quickly, and includes full version management and content-download capabilities. It also comes with **Lumi**, a purpose-built plugin language that lets people with no programming background extend the launcher.
 
@@ -51,11 +51,11 @@ It ships as a small installer, starts quickly, and includes full version managem
 - Built-in **music player** with a persistent playback bar
 - Built-in **AI assistant** panel
 - **Dark theme** with a clean, flat interface
-- **7 interface languages**: Simplified Chinese, Traditional Chinese (Taiwan), Traditional Chinese (Hong Kong), English, Japanese, Korean, and French
+- **9 interface languages**: Simplified Chinese, Traditional Chinese (Taiwan), Traditional Chinese (Hong Kong), **Literary Chinese — 文言（華夏）**, English, **Upside-down English — 颠倒英文** (just for fun), Japanese, Korean, and French
 
 ### 🧩 Plugin system (Lumi)
 - A purpose-built **Lumi plugin language**: Python-like indentation, minimal English keywords, and **readable without any programming background**
-- A `.lplugin` package is a zip file with a different extension and may contain scripts and assets
+- A `.cplugin` package is a zip file with a different extension and may contain scripts and assets
 - Event-driven model (`listen widget.event`); the UI is driven by a widget tree interpreted from the script
 - Supports installation from a zip archive, a folder, or a single file
 - See the [Lumi language reference](docs/lumi-reference.md) and [plugin system design](docs/插件系统设计.md) (currently in Chinese)
@@ -66,7 +66,7 @@ It ships as a small installer, starts quickly, and includes full version managem
 
 ## Installation
 
-Visit **[lumialauncher.cn](https://lumialauncher.cn)**. The site detects your platform and offers the matching installer. All platform builds are also published on [GitHub Releases](https://github.com/xtg44/Lumia-Launcher/releases):
+Visit **[crystallauncher.cn](https://crystallauncher.cn)**. The site detects your platform and offers the matching installer. All platform builds are also published on [GitHub Releases](https://github.com/xtg44/Crystal-Launcher/releases):
 
 | Platform | Package |
 |---|---|
@@ -104,7 +104,7 @@ Rust backend modules:
 ## Project structure
 
 ```
-Lumia Launcher/
+Crystal Launcher/
 ├── src/                  # Vue 3 frontend
 │   ├── components/       # 24 views and components
 │   ├── i18n/             # 7 languages
@@ -131,8 +131,8 @@ Lumia Launcher/
 ### Getting started
 
 ```bash
-git clone https://github.com/xtg44/Lumia-Launcher.git
-cd Lumia-Launcher
+git clone https://github.com/xtg44/Crystal-Launcher.git
+cd Crystal-Launcher
 npm install
 npm run tauri dev        # Opens the development window with frontend hot reload
 ```
@@ -172,7 +172,7 @@ See the [frontend development guide](docs/前端开发指南.md) (currently in C
 
 This project is released under the **MIT License**. See [LICENSE](LICENSE) for the full terms.
 
-Copyright (c) 2026 Lumia
+Copyright (c) 2026 Crystal
 
 You are free to use, modify, and distribute this project, including for commercial purposes, as long as you retain the copyright and license notices.
 

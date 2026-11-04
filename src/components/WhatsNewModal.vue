@@ -2,6 +2,7 @@
 import { ref, computed } from 'vue'
 import { getAppVersion, markChangelogSeen, getConfig } from '../utils/tauri'
 import { useI18n } from 'vue-i18n'
+import { flipText } from '../i18n/en-flip'
 
 const { t, locale } = useI18n()
 
@@ -19,7 +20,7 @@ interface ChangelogEntry {
 const changelogs: ChangelogEntry[] = [
   {
     lang: 'zh-CN',
-    title: 'Lumia v1.0',
+    title: 'Crystal v1.0',
     items: [
       '恢复 Minecraft 游戏本体下载：版本、Mod、整合包、资源包与光影包全部可正常安装',
       '新增「导出整合包」：把已安装的版本打包成 .mrpack，可分享给其他启动器',
@@ -29,7 +30,7 @@ const changelogs: ChangelogEntry[] = [
   },
   {
     lang: 'en',
-    title: 'Lumia v1.0',
+    title: 'Crystal v1.0',
     items: [
       'Minecraft game downloads are available again: versions, mods, modpacks, resource packs and shader packs all install normally',
       'New "Export modpack": package an installed version as a .mrpack to share with other launchers',
@@ -39,7 +40,7 @@ const changelogs: ChangelogEntry[] = [
   },
   {
     lang: 'ja',
-    title: 'Lumia v1.0',
+    title: 'Crystal v1.0',
     items: [
       'Minecraft 本体のダウンロードを再開：バージョン、Mod、Modpack、リソースパック、シェーダーパックがすべて通常どおりインストールできます',
       '新機能「Modpack を書き出す」：インストール済みのバージョンを .mrpack にまとめて他のランチャーと共有できます',
@@ -49,7 +50,7 @@ const changelogs: ChangelogEntry[] = [
   },
   {
     lang: 'fr',
-    title: 'Lumia v1.0',
+    title: 'Crystal v1.0',
     items: [
       "Le téléchargement du jeu Minecraft est de nouveau disponible : versions, mods, modpacks, resource packs et shaders s'installent normalement",
       'Nouveau « Exporter un modpack » : empaquetez une version installée en .mrpack pour la partager avec d\'autres lanceurs',
@@ -59,7 +60,7 @@ const changelogs: ChangelogEntry[] = [
   },
   {
     lang: 'ko',
-    title: 'Lumia v1.0',
+    title: 'Crystal v1.0',
     items: [
       'Minecraft 게임 본체 다운로드 재개: 버전, 모드, 모드팩, 리소스 팩, 셰이더 팩 모두 정상 설치 가능',
       '새 기능 "모드팩 내보내기": 설치된 버전을 .mrpack으로 패키징해 다른 런처와 공유 가능',
@@ -67,10 +68,25 @@ const changelogs: ChangelogEntry[] = [
       '인터페이스 전체에서 스크롤바를 숨겨 더 깔끔한 화면',
     ],
   },
+  {
+    lang: 'lzh',
+    title: 'Crystal v1.0',
+    items: [
+      '復 Minecraft 本體之下載：版本、模組、整合包、資源包與光影包皆可安裝如常',
+      '新增「匯出整合包」：以已裝之版包為 .mrpack，可貽他器',
+      '修 Fabric 模組啟動即崩之患（ClassNotFoundException）：補其所闕 intermediary 映射之賴',
+      '介面盡藏捲軸，觀之益簡',
+    ],
+  },
 ]
 
 const currentChangelog = computed(() => {
   const lang = locale.value
+  // 颠倒英文没有单独的条目，直接把英文那份翻过来
+  if (lang === 'en-flip') {
+    const base = changelogs.find(c => c.lang === 'en')!
+    return { lang, title: flipText(base.title), items: base.items.map(flipText) }
+  }
   const exact = changelogs.find(c => c.lang === lang)
   if (exact) return exact
   // fallback: try parent language (e.g. "zh" for "zh-CN")

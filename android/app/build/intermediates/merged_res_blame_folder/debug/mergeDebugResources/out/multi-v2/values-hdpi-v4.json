@@ -1,0 +1,20 @@
+{
+    "logs": [
+        {
+            "outputFile": "com.crystal.android.app-mergeDebugResources-50:/values-hdpi-v4/values-hdpi-v4.xml",
+            "map": [
+                {
+                    "source": "/Users/xiaotiangua/.gradle/caches/9.6.1/transforms/adab20a893633f9b86246109b7bf615c/transformed/appcompat-1.8.0/res/values-hdpi-v4/values-hdpi-v4.xml",
+                    "from": {
+                        "startLines": "2",
+                        "startColumns": "4",
+                        "startOffsets": "55",
+                        "endLines": "6",
+                        "endColumns": "13",
+                        "endOffsets": "327"
+                    }
+                }
+            ]
+        }
+    ]
+}
